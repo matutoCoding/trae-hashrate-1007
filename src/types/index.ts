@@ -51,6 +51,7 @@ export interface Hole {
   aspectRatio: number;
   category: HoleCategory;
   isNormal: boolean;
+  confidence?: number;
 }
 
 export interface Defect {
@@ -62,6 +63,8 @@ export interface Defect {
   size: number;
   severity: SeverityLevel;
   label: string;
+  confidence?: number;
+  description?: string;
 }
 
 export interface Diagnosis {
@@ -140,6 +143,11 @@ export interface CrossSectionImage {
   uploadedAt: string;
   source: "upload" | "sample";
   sampleIndex?: number;
+  roi?: {
+    cx: number;
+    cy: number;
+    radius: number;
+  };
 }
 
 export interface ArchivedBatch {

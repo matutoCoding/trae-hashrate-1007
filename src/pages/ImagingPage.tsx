@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useBatchStore } from "../hooks/useBatchStore";
 import { computeDiameterDistribution, computeAverageDiameter, computeUniformity, computeCVCoefficient } from "../utils/holeAlgorithms";
-import type { CrossSectionImage, HoleCategory } from "../types";
+import type { CrossSectionImage, HoleCategory, Hole, Defect } from "../types";
 import { HOLE_CATEGORY_LABELS } from "../types";
 import CheeseCrossSection from "../components/imaging/CheeseCrossSection";
 import BarChart from "../components/charts/BarChart";
@@ -72,6 +72,7 @@ export default function ImagingPage() {
     diagnosis,
     imageBrightnessSignature,
     clearDetection,
+    updateRoi,
   } = useBatchStore();
   const d = diagnosis;
 
@@ -81,6 +82,7 @@ export default function ImagingPage() {
   const [running, setRunning] = useState(false);
   const [highlight, setHighlight] = useState<HoleCategory | null>(null);
   const [sampleIdx, setSampleIdx] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [previewMeta, setPreviewMeta] = useState<{ size: number; name: string; width?: number; height?: number; sig?: number } | null>(null);
 
@@ -195,6 +197,9 @@ export default function ImagingPage() {
   const clearImage = () => {
     setPreviewSrc(null);
     setPreviewMeta(null);
+    setSelectedId(null);
+    setHighlight(null);
+    clearDetection();
     setImage(null, 0);
   };
 
@@ -452,13 +457,24 @@ export default function ImagingPage() {
             <div className="section-title">
               <Circle className="w-5 h-5 text-algae-600" />
               切面成像识别视图
-              <span className="ml-auto text-xs font-normal text-cream-subtext">
+              {previewSrc && (
+                <button
+                  className="ml-auto text-[11px] text-cheese-600 hover:text-cheese-800 underline underline-offset-2"
+                  onClick={() => {
+                    if (!image) return;
+                    updateRoi({ cx: 0.5, cy: 0.5, radius: 0.42 });
+                  }}
+                >
+                  重置切面范围
+                </button>
+              )}
+              <span className="ml-3 text-xs font-normal text-cream-subtext">
                 {!previewSrc && !detected
                   ? "等待选择切面照片"
                   : previewSrc && !detected
-                  ? "点击「运行孔洞识别」开始分析"
+                  ? "先拖动黄圈校准切面范围，再点「运行识别」"
                   : detected
-                  ? `共检出 ${holes.length} 个对象${previewSrc ? "（叠加在原图）" : "（系统示意）"}`
+                  ? `共检出 ${holes.length} 个对象 · 点击轮廓查看详情${previewSrc ? "（叠加在原图）" : "（系统示意）"}`
                   : ""}
               </span>
             </div>
@@ -475,203 +491,344 @@ export default function ImagingPage() {
                   </div>
                 </div>
               ) : (
-                <div className="relative aspect-square w-full max-w-[560px] rounded-md overflow-hidden border border-cream-border bg-cream-surface/80 shadow-sm">
-                  {previewSrc ? (
-                    <img
-                      src={previewSrc}
-                      alt="切面原图"
-                      className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
-                      draggable={false}
-                    />
-                  ) : detected ? (
-                    <CheeseCrossSection
-                      holes={holes}
-                      defects={defects}
-                      highlightCategory={highlight}
-                      size={560}
-                    />
-                  ) : null}
+                <div
+                  className="relative w-full max-w-[560px]"
+                  style={{ aspectRatio: previewSrc && previewMeta?.width && previewMeta.height ? `${previewMeta.width} / ${previewMeta.height}` : "1 / 1" }}
+                >
+                  <div className="absolute inset-0 rounded-md overflow-hidden border border-cream-border bg-cream-surface/80 shadow-sm">
+                    {previewSrc ? (
+                      <img
+                        src={previewSrc}
+                        alt="切面原图"
+                        className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+                        draggable={false}
+                      />
+                    ) : detected ? (
+                      <CheeseCrossSection
+                        holes={holes}
+                        defects={defects}
+                        highlightCategory={highlight}
+                        size={560}
+                      />
+                    ) : null}
 
-                  {detected && previewSrc && holes.length > 0 && (
-                    <svg
-                      viewBox="0 0 100 100"
-                      preserveAspectRatio="none"
-                      className="absolute inset-0 w-full h-full pointer-events-none select-none"
-                    >
-                      {holes.map((h) => {
-                        const isCrack = h.category === "crack";
-                        const show = !highlight || highlight === h.category;
-                        if (!show) return null;
-                        const cx = h.centerX * 100;
-                        const cy = h.centerY * 100;
-                        const sizeFactor = 0.32;
-                        const rx = Math.max(
-                          0.4,
-                          (isCrack ? (h.diameter + 3) * 0.35 : h.diameter / 2) * sizeFactor
-                        );
-                        const ry = isCrack
-                          ? 0.5
-                          : Math.max(0.35, (h.diameter / 2) * sizeFactor * (0.85 + ((h.aspectRatio || 1) - 1) * 0.6));
-                        const normal = h.isNormal && !isCrack;
-                        const fillColor = normal
-                          ? "rgba(74, 124, 89, 0.18)"
-                          : isCrack
-                          ? "rgba(179, 57, 81, 0.08)"
-                          : "rgba(201, 166, 107, 0.22)";
-                        const strokeColor = isCrack
-                          ? "#B33951"
-                          : h.category === "micro"
-                          ? "#2D6A4F"
-                          : normal
-                          ? "#4A7C59"
-                          : "#9E7230";
-                        const sw = isCrack ? 0.45 : 0.35;
-                        return (
-                          <g key={h.id}>
-                            {isCrack ? (
-                              <g>
-                                <line
-                                  x1={cx - rx}
-                                  y1={cy - ry * 0.4}
-                                  x2={cx + rx}
-                                  y2={cy + ry * 0.4}
+                    {previewSrc && image?.roi && (
+                      <svg
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                        className="absolute inset-0 w-full h-full select-none"
+                        onMouseDown={(e) => {
+                          if (e.button !== 0) return;
+                          const svg = e.currentTarget;
+                          const rect = svg.getBoundingClientRect();
+                          const roi = image.roi!;
+                          const dragStart = { x: e.clientX, y: e.clientY, cx: roi.cx, cy: roi.cy, radius: roi.radius };
+                          let mode: "move" | "resize" | null = null;
+                          const toPct = (p: { x: number; y: number }) => ({
+                            px: ((p.x - rect.left) / rect.width) * 100,
+                            py: ((p.y - rect.top) / rect.height) * 100,
+                          });
+                          const handleEdge = (px: number, py: number) => {
+                            const cxPct = roi.cx * 100;
+                            const cyPct = roi.cy * 100;
+                            const radPct = roi.radius * 100;
+                            const dx = px - cxPct;
+                            const dy = py - cyPct;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            if (Math.abs(dist - radPct) < 4) return "resize";
+                            if (dist < radPct) return "move";
+                            return null;
+                          };
+                          const pt = { x: e.clientX, y: e.clientY };
+                          const { px, py } = toPct(pt);
+                          mode = handleEdge(px, py) as "move" | "resize" | null;
+                          if (!mode) return;
+                          e.preventDefault();
+                          const onMove = (ev: MouseEvent) => {
+                            if (!mode) return;
+                            const dxClient = ev.clientX - dragStart.x;
+                            const dyClient = ev.clientY - dragStart.y;
+                            const dxPct = (dxClient / rect.width) * 100;
+                            const dyPct = (dyClient / rect.height) * 100;
+                            if (mode === "move") {
+                              const ncx = Math.max(0.1, Math.min(0.9, dragStart.cx + dxPct / 100));
+                              const ncy = Math.max(0.1, Math.min(0.9, dragStart.cy + dyPct / 100));
+                              updateRoi({ cx: ncx, cy: ncy, radius: dragStart.radius });
+                            } else if (mode === "resize") {
+                              const nxPct = ((ev.clientX - rect.left) / rect.width) * 100;
+                              const nyPct = ((ev.clientY - rect.top) / rect.height) * 100;
+                              const distPct = Math.sqrt(
+                                (nxPct - dragStart.cx * 100) ** 2 + (nyPct - dragStart.cy * 100) ** 2
+                              );
+                              const nr = Math.max(0.08, Math.min(0.48, distPct / 100));
+                              updateRoi({ cx: dragStart.cx, cy: dragStart.cy, radius: nr });
+                            }
+                          };
+                          const onUp = () => {
+                            window.removeEventListener("mousemove", onMove);
+                            window.removeEventListener("mouseup", onUp);
+                          };
+                          window.addEventListener("mousemove", onMove);
+                          window.addEventListener("mouseup", onUp);
+                        }}
+                      >
+                        <circle
+                          cx={image.roi.cx * 100}
+                          cy={image.roi.cy * 100}
+                          r={image.roi.radius * 100}
+                          fill="rgba(232, 145, 43, 0.05)"
+                          stroke="#E8912B"
+                          strokeDasharray="2,1.2"
+                          strokeWidth={detected ? 0.4 : 0.6}
+                          opacity={detected ? 0.6 : 0.95}
+                          style={{ cursor: "move" }}
+                        />
+                        {!detected && (
+                          <>
+                            <circle
+                              cx={image.roi.cx * 100}
+                              cy={image.roi.cy * 100}
+                              r={0.9}
+                              fill="#E8912B"
+                              stroke="#fff"
+                              strokeWidth="0.3"
+                              style={{ cursor: "move" }}
+                            />
+                            <circle
+                              cx={image.roi.cx * 100 + image.roi.radius * 100}
+                              cy={image.roi.cy * 100}
+                              r={1.2}
+                              fill="#fff"
+                              stroke="#E8912B"
+                              strokeWidth="0.5"
+                              style={{ cursor: "ew-resize" }}
+                            />
+                          </>
+                        )}
+                      </svg>
+                    )}
+
+                    {detected && previewSrc && holes.length > 0 && (
+                      <svg
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                        className="absolute inset-0 w-full h-full pointer-events-none select-none"
+                      >
+                        {holes.map((h) => {
+                          const isCrack = h.category === "crack";
+                          const showByCat = !highlight || highlight === h.category;
+                          const isSel = selectedId === h.id;
+                          if (!showByCat && !isSel) return null;
+                          const cx = h.centerX * 100;
+                          const cy = h.centerY * 100;
+                          const sizeFactor = 0.32;
+                          const rx = Math.max(
+                            0.4,
+                            (isCrack ? (h.diameter + 3) * 0.35 : h.diameter / 2) * sizeFactor
+                          );
+                          const ry = isCrack
+                            ? 0.5
+                            : Math.max(0.35, (h.diameter / 2) * sizeFactor * (0.85 + ((h.aspectRatio || 1) - 1) * 0.6));
+                          const normal = h.isNormal && !isCrack;
+                          const fillColor = normal
+                            ? "rgba(74, 124, 89, 0.18)"
+                            : isCrack
+                            ? "rgba(179, 57, 81, 0.08)"
+                            : "rgba(201, 166, 107, 0.22)";
+                          const strokeColor = isSel
+                            ? "#E8912B"
+                            : isCrack
+                            ? "#B33951"
+                            : h.category === "micro"
+                            ? "#2D6A4F"
+                            : normal
+                            ? "#4A7C59"
+                            : "#9E7230";
+                          const sw = isSel ? 0.8 : isCrack ? 0.45 : 0.35;
+                          return (
+                            <g
+                              key={h.id}
+                              onMouseDown={() => setSelectedId(h.id)}
+                              style={{ pointerEvents: "auto", cursor: "pointer" }}
+                            >
+                              {isCrack ? (
+                                <g>
+                                  <line
+                                    x1={cx - rx}
+                                    y1={cy - ry * 0.4}
+                                    x2={cx + rx}
+                                    y2={cy + ry * 0.4}
+                                    stroke={strokeColor}
+                                    strokeWidth={sw}
+                                    strokeLinecap="round"
+                                  />
+                                  <line
+                                    x1={cx - rx * 0.8}
+                                    y1={cy + ry * 0.1}
+                                    x2={cx + rx * 0.6}
+                                    y2={cy - ry * 0.5}
+                                    stroke={strokeColor}
+                                    strokeWidth={sw * 0.8}
+                                    strokeLinecap="round"
+                                    opacity={0.85}
+                                  />
+                                </g>
+                              ) : (
+                                <ellipse
+                                  cx={cx}
+                                  cy={cy}
+                                  rx={rx}
+                                  ry={ry}
+                                  fill={fillColor}
                                   stroke={strokeColor}
                                   strokeWidth={sw}
-                                  strokeLinecap="round"
+                                  opacity={isSel ? 1 : 0.95}
                                 />
-                                <line
-                                  x1={cx - rx * 0.8}
-                                  y1={cy + ry * 0.1}
-                                  x2={cx + rx * 0.6}
-                                  y2={cy - ry * 0.5}
-                                  stroke={strokeColor}
-                                  strokeWidth={sw * 0.8}
-                                  strokeLinecap="round"
-                                  opacity={0.85}
-                                />
-                                <rect
-                                  x={cx - rx}
-                                  y={cy - 0.8}
-                                  width={rx * 2}
-                                  height={1.6}
+                              )}
+                              {isSel && (
+                                <circle
+                                  cx={cx}
+                                  cy={cy}
+                                  r={Math.max(rx, ry) + 1.2}
                                   fill="none"
-                                  stroke="#B33951"
-                                  strokeDasharray="0.8,0.4"
-                                  strokeWidth={0.25}
-                                  opacity={0.7}
+                                  stroke="#E8912B"
+                                  strokeWidth="0.35"
+                                  strokeDasharray="1,0.6"
                                 />
-                              </g>
-                            ) : (
-                              <ellipse
+                              )}
+                            </g>
+                          );
+                        })}
+
+                        {defects.map((df) => {
+                          const cx = df.posX * 100;
+                          const cy = df.posY * 100;
+                          const isBlister = df.type === "early_blister";
+                          const isSel = selectedId === df.id;
+                          return (
+                            <g
+                              key={df.id}
+                              onMouseDown={() => setSelectedId(df.id)}
+                              style={{ pointerEvents: "auto", cursor: "pointer" }}
+                            >
+                              <circle
                                 cx={cx}
                                 cy={cy}
-                                rx={rx}
-                                ry={ry}
-                                fill={fillColor}
-                                stroke={strokeColor}
-                                strokeWidth={sw}
-                                opacity={0.95}
+                                r={isSel ? 3.2 : isBlister ? 2.6 : 2.1}
+                                fill="none"
+                                stroke={isSel ? "#E8912B" : isBlister ? "#E8912B" : "#B33951"}
+                                strokeWidth={isSel ? 0.7 : 0.5}
+                                strokeDasharray="1,0.4"
                               />
-                            )}
-                          </g>
-                        );
-                      })}
+                              <circle
+                                cx={cx}
+                                cy={cy}
+                                r={0.7}
+                                fill={isSel ? "#E8912B" : isBlister ? "#E8912B" : "#B33951"}
+                              />
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    )}
 
-                      {defects.map((d) => {
-                        const cx = d.posX * 100;
-                        const cy = d.posY * 100;
-                        const isBlister = d.type === "early_blister";
-                        const r = isBlister ? 2.6 : 2.1;
-                        return (
-                          <g key={d.id}>
-                            <circle
-                              cx={cx}
-                              cy={cy}
-                              r={r}
-                              fill="none"
-                              stroke={isBlister ? "#E8912B" : "#B33951"}
-                              strokeWidth={0.5}
-                              strokeDasharray="1,0.4"
-                            />
-                            <circle
-                              cx={cx}
-                              cy={cy}
-                              r={0.6}
-                              fill={isBlister ? "#E8912B" : "#B33951"}
-                            />
-                          </g>
-                        );
-                      })}
-                    </svg>
-                  )}
-
-                  {detected && previewSrc && (
-                    <div className="absolute top-2 left-2 flex flex-col gap-1">
-                      <div className="px-2 py-1 rounded bg-cream-card/92 backdrop-blur-[1px] border border-cream-border text-[10px] text-cream-text shadow-sm flex items-center gap-1.5">
-                        <span className="inline-block w-2.5 h-2.5 rounded-full border border-[#4A7C59] bg-[#4A7C59]/30" />
-                        正常气孔 {d?.normalHoleCount ?? 0}
+                    {detected && previewSrc && (
+                      <div className="absolute top-2 left-2 flex flex-col gap-1 pointer-events-none">
+                        <div className="px-2 py-1 rounded bg-cream-card/92 backdrop-blur-[1px] border border-cream-border text-[10px] text-cream-text shadow-sm flex items-center gap-1.5">
+                          <span className="inline-block w-2.5 h-2.5 rounded-full border border-[#4A7C59] bg-[#4A7C59]/30" />
+                          正常气孔 {d?.normalHoleCount ?? 0}
+                        </div>
+                        {(d?.crackCount ?? 0) > 0 && (
+                          <div className="px-2 py-1 rounded bg-cream-card/92 backdrop-blur-[1px] border border-cream-border text-[10px] text-cream-text shadow-sm flex items-center gap-1.5">
+                            <span className="inline-block w-2.5 h-0.5 bg-[#B33951] rounded" />
+                            裂隙 {d.crackCount}
+                          </div>
+                        )}
+                        {(d?.blisterCount ?? 0) > 0 && (
+                          <div className="px-2 py-1 rounded bg-cream-card/92 backdrop-blur-[1px] border border-cream-border text-[10px] text-cream-text shadow-sm flex items-center gap-1.5">
+                            <span className="inline-block w-2.5 h-2.5 rounded-full border border-dashed border-[#E8912B]" />
+                            胀包 {d.blisterCount}
+                          </div>
+                        )}
                       </div>
-                      {(d?.crackCount ?? 0) > 0 && (
-                        <div className="px-2 py-1 rounded bg-cream-card/92 backdrop-blur-[1px] border border-cream-border text-[10px] text-cream-text shadow-sm flex items-center gap-1.5">
-                          <span className="inline-block w-2.5 h-0.5 bg-[#B33951] rounded" />
-                          裂隙 {d.crackCount}
-                        </div>
-                      )}
-                      {(d?.blisterCount ?? 0) > 0 && (
-                        <div className="px-2 py-1 rounded bg-cream-card/92 backdrop-blur-[1px] border border-cream-border text-[10px] text-cream-text shadow-sm flex items-center gap-1.5">
-                          <span className="inline-block w-2.5 h-2.5 rounded-full border border-dashed border-[#E8912B]" />
-                          胀包 {d.blisterCount}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               )}
             </div>
 
-            <div className="mt-4 pt-4 border-t border-cream-border">
-              <div className="text-xs font-semibold text-cream-subtext mb-3">
-                分类图例（点击可筛选高亮）
+            <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="pt-3 border-t border-cream-border">
+                <div className="text-xs font-semibold text-cream-subtext mb-3">
+                  分类图例（点击可筛选高亮）
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {(Object.keys(HOLE_CATEGORY_LABELS) as HoleCategory[]).map((c) => {
+                    const isActive = highlight === c;
+                    const dim = highlight && !isActive;
+                    return (
+                      <button
+                        key={c}
+                        onClick={() => setHighlight(isActive ? null : c)}
+                        className={`p-2 rounded border text-left transition-all ${
+                          isActive
+                            ? "border-cheese-400 bg-cheese-50 shadow-sm"
+                            : "border-cream-border bg-cream-surface hover:border-cheese-300"
+                        } ${dim ? "opacity-40" : ""}`}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <span
+                            className="inline-block w-3 h-3 rounded-full border"
+                            style={{
+                              background: catColors[c] + "88",
+                              borderColor: catColors[c],
+                            }}
+                          />
+                          <span className="text-xs font-semibold text-cream-text">
+                            {HOLE_CATEGORY_LABELS[c]}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-cream-subtext">
+                          {stats?.distribution?.[c] ?? 0} 个
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {highlight && (
+                  <button
+                    className="mt-2 text-[11px] text-cheese-600 hover:text-cheese-800 underline underline-offset-2"
+                    onClick={() => setHighlight(null)}
+                  >
+                    清除筛选
+                  </button>
+                )}
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-                {(Object.keys(HOLE_CATEGORY_LABELS) as HoleCategory[]).map((c) => {
-                  const isActive = highlight === c;
-                  const dim = highlight && !isActive;
-                  return (
+
+              <div className="pt-3 border-t border-cream-border">
+                <div className="text-xs font-semibold text-cream-subtext mb-3 flex items-center justify-between">
+                  <span>对象详情（点击轮廓查看）</span>
+                  {selectedId && (
                     <button
-                      key={c}
-                      onClick={() => setHighlight(isActive ? null : c)}
-                      className={`p-2 rounded border text-left transition-all ${
-                        isActive
-                          ? "border-cheese-400 bg-cheese-50 shadow-sm"
-                          : "border-cream-border bg-cream-surface hover:border-cheese-300"
-                      } ${dim ? "opacity-40" : ""}`}
+                      onClick={() => setSelectedId(null)}
+                      className="text-[10px] text-cream-subtext hover:text-wine-600 underline underline-offset-2"
                     >
-                      <div className="flex items-center gap-2 mb-1">
-                        <span
-                          className="inline-block w-3 h-3 rounded-full border"
-                          style={{
-                            background: catColors[c] + "88",
-                            borderColor: catColors[c],
-                          }}
-                        />
-                        <span className="text-xs font-semibold text-cream-text">
-                          {HOLE_CATEGORY_LABELS[c]}
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-cream-subtext">
-                        {stats?.distribution?.[c] ?? 0} 个
-                      </div>
+                      关闭
                     </button>
-                  );
-                })}
+                  )}
+                </div>
+                {!selectedId ? (
+                  <div className="text-[11px] text-cream-subtext p-3 rounded bg-cream-surface/50 border border-dashed border-cream-border leading-relaxed">
+                    在图上点击任意孔洞、裂隙或缺陷，这里会显示它的类型、直径、位置、置信度和处理建议。
+                  </div>
+                ) : (
+                  <SelectedDetailPanel
+                    hole={holes.find((h) => h.id === selectedId) ?? null}
+                    defect={defects.find((x) => x.id === selectedId) ?? null}
+                    onClose={() => setSelectedId(null)}
+                  />
+                )}
               </div>
-              <button
-                className="mt-3 text-[11px] text-cheese-600 hover:text-cheese-800 underline underline-offset-2"
-                onClick={() => setHighlight(null)}
-              >
-                清除筛选
-              </button>
             </div>
           </section>
 
@@ -701,6 +858,7 @@ export default function ImagingPage() {
             <div className="section-title">
               <Circle className="w-5 h-5 text-cheese-600" />
               孔径分布直方图
+              <span className="ml-auto text-[11px] text-cream-subtext">点击柱子联动高亮对应分类</span>
             </div>
             {stats?.distribution ? (
               <BarChart
@@ -715,6 +873,85 @@ export default function ImagingPage() {
             )}
           </section>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SelectedDetailPanel({
+  hole,
+  defect,
+  onClose,
+}: {
+  hole: Hole | null;
+  defect: Defect | null;
+  onClose: () => void;
+}) {
+  const info = hole
+    ? {
+        type: `孔型：${HOLE_CATEGORY_LABELS[hole.category]}${hole.isNormal ? "（正常）" : "（异常）"}`,
+        primary: `直径 ${hole.diameter.toFixed(2)} mm · 面积 ${hole.area.toFixed(1)} mm²`,
+        position: `位置 (${(hole.centerX * 100).toFixed(0)}%, ${(hole.centerY * 100).toFixed(0)}%)`,
+        meta: `圆度 ${(hole.circularity * 100).toFixed(0)} · 纵横比 ${hole.aspectRatio.toFixed(2)}`,
+        conf: hole.confidence ?? 0.8,
+        color: hole.isNormal ? "text-algae-700" : hole.category === "crack" ? "text-wine-600" : "text-cheese-700",
+        bg: hole.isNormal ? "bg-algae-50/70 border-algae-200" : hole.category === "crack" ? "bg-wine-50/70 border-wine-200" : "bg-cheese-50/70 border-cheese-200",
+        advice:
+          hole.category === "crack"
+            ? "属于晚期裂隙：建议尽快分装，降低熟成湿度 2-3%RH 抑制扩展。"
+            : hole.category === "xlarge"
+            ? "超大孔：核查丙酸菌接种量是否偏高，或延长低温静置期。"
+            : hole.category === "micro"
+            ? "微孔聚集：考虑提高 1-2℃ 熟成温度、延长产气期 2 天。"
+            : hole.isNormal
+            ? "正常气孔：品相良好，可继续观察熟成趋势。"
+            : "异常孔：复核温湿度曲线与加盐时机。",
+      }
+    : defect
+    ? {
+        type: `缺陷：${defect.type === "early_blister" ? "早期皮下胀包" : defect.type === "late_crack" ? "晚期裂纹" : defect.type === "collapsed" ? "孔洞塌陷" : "分布不均"} · ${defect.severity === "severe" ? "严重" : defect.severity === "medium" ? "中等" : "轻微"}`,
+        primary: `影响范围 ${defect.size.toFixed(2)} mm · 等级 ${defect.severity.toUpperCase()}`,
+        position: `位置 (${(defect.posX * 100).toFixed(0)}%, ${(defect.posY * 100).toFixed(0)}%)`,
+        meta: defect.description ?? "—",
+        conf: defect.confidence ?? 0.75,
+        color: defect.severity === "severe" ? "text-wine-600" : defect.severity === "medium" ? "text-cheese-700" : "text-algae-700",
+        bg: defect.severity === "severe" ? "bg-wine-50/70 border-wine-200" : defect.severity === "medium" ? "bg-cheese-50/70 border-cheese-200" : "bg-algae-50/70 border-algae-200",
+        advice:
+          defect.type === "early_blister"
+            ? "早期胀包：建议降低熟成前期温度 0.5-1℃，减少 CO₂ 瞬时产气。"
+            : defect.type === "late_crack"
+            ? "晚期裂纹：尽快分装销售，或降低湿度 3%RH 观察。"
+            : defect.type === "collapsed"
+            ? "孔壁塌陷：复核盐渍时机和杂菌控制。"
+            : "分布不均：加强搅拌或调整接种分散方式。",
+      }
+    : null;
+  if (!info) return null;
+  return (
+    <div className={`p-3 rounded border ${info.bg} space-y-1.5 text-[11px] leading-relaxed`}>
+      <div className={`font-semibold text-sm ${info.color}`}>{info.type}</div>
+      <div className="text-cream-text">{info.primary}</div>
+      <div className="text-cream-subtext">{info.position} · {info.meta}</div>
+      <div className="flex items-center gap-2 pt-1">
+        <span className="text-cream-subtext">置信度</span>
+        <div className="flex-1 h-1.5 rounded-full bg-cream-card overflow-hidden">
+          <div
+            className={`h-full ${info.color.replace("text-", "bg-")}`}
+            style={{ width: `${(info.conf * 100).toFixed(0)}%` }}
+          />
+        </div>
+        <span className={`font-mono font-semibold ${info.color}`}>
+          {(info.conf * 100).toFixed(0)}%
+        </span>
+      </div>
+      <div className="pt-1 mt-1 border-t border-current/10 text-cream-text">
+        <b>处理建议：</b>
+        {info.advice}
+      </div>
+      <div className="pt-1 flex items-center justify-end">
+        <button onClick={onClose} className="text-[10px] text-cream-subtext hover:text-wine-600 underline underline-offset-2">
+          取消选中
+        </button>
       </div>
     </div>
   );

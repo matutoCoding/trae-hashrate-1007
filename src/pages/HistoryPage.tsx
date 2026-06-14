@@ -16,13 +16,16 @@ import {
   Activity,
   AlertTriangle,
   Printer,
+  Split,
 } from "lucide-react";
 import { useBatchStore, buildSpectrumFromArchive } from "../hooks/useBatchStore";
-import type { ArchivedBatch, RiskLevel, Grade } from "../types";
+import type { ArchivedBatch, RiskLevel, Grade, HoleCategory } from "../types";
 import { riskColor, riskLabel } from "../utils/trendModel";
 import CheeseCrossSection from "../components/imaging/CheeseCrossSection";
 import RadarChart from "../components/charts/RadarChart";
 import GaugeChart from "../components/charts/GaugeChart";
+import { HOLE_CATEGORY_LABELS } from "../types";
+import { computeDiameterDistribution } from "../utils/holeAlgorithms";
 
 const gradeColor: Record<Grade, string> = {
   A: "#D4A84B",
@@ -36,8 +39,23 @@ export default function HistoryPage() {
   const [detail, setDetail] = useState<ArchivedBatch | null>(null);
   const [tab, setTab] = useState<"summary" | "imaging" | "report">("summary");
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const [compare, setCompare] = useState<string[]>([]);
 
   const spectrum = useMemo(() => buildSpectrumFromArchive(archive), [archive]);
+  const compareBatches = useMemo(
+    () => compare.map(id => getArchivedById(id)).filter(Boolean) as ArchivedBatch[],
+    [compare, getArchivedById]
+  );
+
+  const toggleCompare = (id: string) => {
+    setCompare(prev => {
+      if (prev.includes(id)) return prev.filter(x => x !== id);
+      if (prev.length >= 2) return [prev[1], id];
+      return [...prev, id];
+    });
+  };
+
+  const clearCompare = () => setCompare([]);
 
   const doOpen = (id: string) => {
     const a = getArchivedById(id);
@@ -177,6 +195,201 @@ ${r.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
         </button>
       </header>
 
+      {compare.length > 0 && (
+        <section className="cheese-card p-6 border-algae-200">
+          <div className="section-title mb-4">
+            <Split className="w-5 h-5 text-algae-600" />
+            双批次对比
+            <span className="ml-2 text-xs font-normal text-cream-subtext">
+              已选 {compare.length}/2
+            </span>
+            <button
+              onClick={clearCompare}
+              className="ml-auto text-[11px] px-3 py-1 rounded bg-cream-surface hover:bg-wine-50 border border-cream-border hover:border-wine-300 text-cream-subtext hover:text-wine-600 transition-colors"
+            >
+              <X className="w-3 h-3 inline mr-1" />
+              清空对比
+            </button>
+          </div>
+
+          {compareBatches.length === 2 ? (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+              {compareBatches.map((a, idx) => (
+                <div key={a.id} className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="font-mono text-xs font-bold text-cheese-700 truncate">
+                      {idx === 0 ? "A · " : "B · "}{a.batch.batchNo}
+                    </div>
+                    {gradeBadge(a.report.grade)}
+                  </div>
+                  <div className="aspect-square rounded-md overflow-hidden border border-cream-border/80 bg-cream-surface">
+                    {a.image && a.image.dataUrl ? (
+                      <div className="relative w-full h-full">
+                        <img
+                          src={a.image.dataUrl}
+                          alt="切面"
+                          className="absolute inset-0 w-full h-full object-contain"
+                        />
+                        <svg
+                          viewBox="0 0 100 100"
+                          preserveAspectRatio="none"
+                          className="absolute inset-0 w-full h-full pointer-events-none"
+                        >
+                          {a.holes.map(h => (
+                            <circle
+                              key={h.id}
+                              cx={h.centerX * 100}
+                              cy={h.centerY * 100}
+                              r={h.diameter / 2 * 0.8}
+                              fill="none"
+                              stroke={h.isNormal ? "#2D5016" : "#8B1E3F"}
+                              strokeWidth="0.35"
+                            />
+                          ))}
+                          {a.defects.map(d => (
+                            <g key={d.id}>
+                              <rect
+                                x={d.posX * 100 - 2.5}
+                                y={d.posY * 100 - 2.5}
+                                width="5"
+                                height="5"
+                                fill="none"
+                                stroke="#D97706"
+                                strokeWidth="0.5"
+                              />
+                            </g>
+                          ))}
+                        </svg>
+                      </div>
+                    ) : (
+                      <CheeseCrossSection
+                        holes={a.holes}
+                        defects={a.defects}
+                      />
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    {[
+                      ["孔数", a.holes.length],
+                      ["平均孔径", a.diagnosis.avgDiameter + "mm"],
+                      ["孔隙率", a.diagnosis.porosityRate + "%"],
+                      ["均匀度", a.diagnosis.uniformityScore],
+                      ["裂隙", a.diagnosis.crackCount],
+                      ["胀包", a.diagnosis.blisterCount],
+                    ].map(([k, v]) => (
+                      <div key={k as string} className="p-1.5 rounded bg-cream-surface/70 border border-cream-border/70">
+                        <div className="text-[9px] text-cream-subtext">{k}</div>
+                        <div className="font-medium text-cream-text">{v as string | number}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-cream-subtext mb-1.5 font-semibold">孔径分布</div>
+                    <div className="space-y-1">
+                      {(Object.keys(HOLE_CATEGORY_LABELS) as HoleCategory[]).map(cat => {
+                        const dist = computeDiameterDistribution(a.holes);
+                        const cnt = dist[cat] ?? 0;
+                        const max = Math.max(1, ...Object.values(dist));
+                        return (
+                          <div key={cat} className="flex items-center gap-2 text-[10px]">
+                            <div className="w-16 shrink-0 text-cream-subtext truncate">
+                              {HOLE_CATEGORY_LABELS[cat]}
+                            </div>
+                            <div className="flex-1 h-2 rounded-full bg-cream-surface border border-cream-border overflow-hidden">
+                              <div
+                                className="h-full"
+                                style={{
+                                  width: `${(cnt / max) * 100}%`,
+                                  background: cat === "crack" ? "#8B1E3F" : cat === "xlarge" ? "#B33951" : cat === "large" ? "#D4A84B" : "#2D5016",
+                                }}
+                              />
+                            </div>
+                            <div className="w-6 text-right font-mono text-cream-text">{cnt}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              <div className="space-y-4">
+                <div className="p-3 rounded-md bg-cream-surface/70 border border-cream-border">
+                  <div className="text-[11px] font-semibold text-cheese-700 mb-2">📊 指标差异</div>
+                  <div className="space-y-1.5 text-[11px]">
+                    {[
+                      ["等级", `${compareBatches[0].report.grade} → ${compareBatches[1].report.grade}`],
+                      ["孔数差", compareBatches[1].holes.length - compareBatches[0].holes.length],
+                      ["平均孔径差", `${(compareBatches[1].diagnosis.avgDiameter - compareBatches[0].diagnosis.avgDiameter).toFixed(2)}mm`],
+                      ["孔隙率差", `${(compareBatches[1].diagnosis.porosityRate - compareBatches[0].diagnosis.porosityRate).toFixed(2)}%`],
+                      ["均匀度差", compareBatches[1].diagnosis.uniformityScore - compareBatches[0].diagnosis.uniformityScore],
+                      ["杂菌风险", `${riskLabel(compareBatches[0].diagnosis.contaminationRisk)} → ${riskLabel(compareBatches[1].diagnosis.contaminationRisk)}`],
+                    ].map(([k, v]) => (
+                      <div key={k as string} className="flex items-center justify-between px-2 py-1 rounded bg-cream-card">
+                        <span className="text-cream-subtext">{k}</span>
+                        <span className="font-mono font-medium text-cream-text">{v as string | number}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-md bg-cream-surface/70 border border-cream-border">
+                  <div className="text-[11px] font-semibold text-cheese-700 mb-2">🎯 综合评分</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {compareBatches.map((a, idx) => (
+                      <div key={a.id} className="text-center p-2 rounded bg-cream-card border border-cream-border">
+                        <div className="text-[9px] text-cream-subtext">{idx === 0 ? "A" : "B"}综合</div>
+                        <div className="text-lg font-bold font-mono" style={{ color: gradeColor[a.report.grade] }}>
+                          {a.report.totalScore}
+                        </div>
+                        <div className="text-[9px] text-cream-subtext">/ 100</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-md bg-cream-surface/70 border border-cream-border space-y-2">
+                  <div className="text-[11px] font-semibold text-cheese-700">📝 报告建议对比</div>
+                  {compareBatches.map((a, idx) => (
+                    <div key={a.id} className="text-[10px] space-y-1">
+                      <div className="font-semibold text-cream-text">{idx === 0 ? "A · " : "B · "}{a.batch.batchNo}</div>
+                      {a.report.suggestions.slice(0, 3).map((s, i) => (
+                        <div key={i} className="text-cream-subtext pl-2 border-l-2 border-cheese-200">
+                          {s}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="p-3 rounded-md bg-cream-surface/70 border border-cream-border">
+                  <div className="text-[11px] font-semibold text-cheese-700 mb-2">📡 工艺参数对比</div>
+                  <div className="space-y-1 text-[10px]">
+                    {[
+                      ["菌种", `${compareBatches[0].batch.strain} → ${compareBatches[1].batch.strain}`],
+                      ["接种量", `${compareBatches[0].batch.inoculation}U → ${compareBatches[1].batch.inoculation}U`],
+                      ["熟成天", `${compareBatches[0].batch.ripeningDays}d → ${compareBatches[1].batch.ripeningDays}d`],
+                      ["盐度", `${compareBatches[0].batch.salinity}% → ${compareBatches[1].batch.salinity}%`],
+                      ["pH", `${compareBatches[0].batch.pH} → ${compareBatches[1].batch.pH}`],
+                    ].map(([k, v]) => (
+                      <div key={k as string} className="flex justify-between px-1.5 py-0.5 rounded bg-cream-card/60">
+                        <span className="text-cream-subtext">{k}</span>
+                        <span className="font-mono text-cream-text">{v as string}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="h-24 flex flex-col items-center justify-center text-cream-subtext bg-cream-surface/60 rounded-md border border-dashed border-cream-border">
+              <Split className="w-8 h-8 mb-1 opacity-40" />
+              <div className="text-xs">请再选择 1 个归档批次以开启并排对比</div>
+            </div>
+          )}
+        </section>
+      )}
+
       <section className="cheese-card p-6">
         <div className="section-title">
           <Archive className="w-5 h-5 text-cheese-600" />
@@ -266,6 +479,17 @@ ${r.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
                   >
                     <FolderOpen className="w-3 h-3 inline mr-1" />
                     详情
+                  </button>
+                  <button
+                    onClick={() => toggleCompare(a.id)}
+                    className={`text-[11px] px-2 py-1.5 rounded font-medium transition-colors ${
+                      compare.includes(a.id)
+                        ? "bg-algae-100 border border-algae-300 text-algae-700"
+                        : "bg-cream-surface hover:bg-algae-50 border border-cream-border hover:border-algae-200 text-cream-subtext hover:text-algae-700"
+                    }`}
+                    title={compare.includes(a.id) ? "取消对比" : "加入对比（最多2个）"}
+                  >
+                    <Split className="w-3 h-3" />
                   </button>
                   <button
                     onClick={() => exportArchivedTxt(a)}

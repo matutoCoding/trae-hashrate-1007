@@ -183,6 +183,7 @@ interface BatchState {
   updateTempStage: (i: number, patch: Partial<TempHumidityStage>) => void;
   removeTempStage: (i: number) => void;
   setImage: (img: CrossSectionImage | null, brightnessSig?: number) => void;
+  updateRoi: (roi: { cx: number; cy: number; radius: number }) => void;
   clearDetection: () => void;
   runDetection: (threshold?: number, minDiameter?: number, seedBias?: number) => void;
   computeAllDiagnosis: () => void;
@@ -291,6 +292,9 @@ export const useBatchStore = create<BatchState>((set, get) => ({
 
   setImage: (img, brightnessSig = 0) =>
     set((s) => {
+      const newImage = img
+        ? { ...img, roi: img.roi ?? { cx: 0.5, cy: 0.5, radius: 0.42 } }
+        : null;
       savePersist({
         batch: s.batch,
         holes: s.holes,
@@ -298,10 +302,27 @@ export const useBatchStore = create<BatchState>((set, get) => ({
         diagnosis: s.diagnosis,
         report: s.report,
         detected: s.detected,
-        image: img,
+        image: newImage,
         imageBrightnessSignature: brightnessSig,
       });
-      return { image: img, imageBrightnessSignature: brightnessSig };
+      return { image: newImage, imageBrightnessSignature: brightnessSig };
+    }),
+
+  updateRoi: (roi) =>
+    set((s) => {
+      if (!s.image) return s;
+      const newImage = { ...s.image, roi };
+      savePersist({
+        batch: s.batch,
+        holes: s.holes,
+        defects: s.defects,
+        diagnosis: s.diagnosis,
+        report: s.report,
+        detected: s.detected,
+        image: newImage,
+        imageBrightnessSignature: s.imageBrightnessSignature,
+      });
+      return { image: newImage };
     }),
 
   clearDetection: () =>
@@ -329,8 +350,9 @@ export const useBatchStore = create<BatchState>((set, get) => ({
   runDetection: (threshold = 128, minDiameter = 1.5, seedBias = 0) => {
     const batchId = get().batch.id;
     const brightness = get().imageBrightnessSignature;
+    const roi = get().image?.roi;
     const seed = Math.floor(threshold * 3 + minDiameter * 57 + batchId.length * 11 + seedBias + brightness * 1.7);
-    const holes = generateMockHoles(batchId, seed, 72 + Math.floor(threshold / 10) + Math.floor(brightness / 2));
+    const holes = generateMockHoles(batchId, seed, 72 + Math.floor(threshold / 10) + Math.floor(brightness / 2), roi);
     const filtered = holes.filter((h) => h.diameter >= minDiameter);
     const defectPassRate = 0.35 + (brightness > 128 ? 0.08 : brightness < 80 ? -0.08 : 0);
     let s = seed * 7907 + 12345;
@@ -338,15 +360,31 @@ export const useBatchStore = create<BatchState>((set, get) => ({
       s = (s * 9301 + 49297) % 233280;
       return s / 233280;
     };
-    const defects: Defect[] = MOCK_DEFECTS.filter(() => seedRnd() > defectPassRate).map((d, i) => ({
-      ...d,
-      id: `d-${batchId}-${i}`,
-      posX: 0.08 + seedRnd() * 0.84,
-      posY: 0.08 + seedRnd() * 0.84,
-      size: 1.5 + seedRnd() * 2.5,
-      severity: (seedRnd() < 0.25 ? "severe" : seedRnd() < 0.5 ? "medium" : "mild") as SeverityLevel,
-      label: seedRnd() < 0.5 ? d.label : d.label.slice(0, 14),
-    }));
+    const roiCx = roi?.cx ?? 0.5;
+    const roiCy = roi?.cy ?? 0.5;
+    const roiR = roi?.radius ?? 0.42;
+    const descMap: Record<DefectType, string> = {
+      early_blister: "熟成中前期皮下气泡聚集，需观察是否破膜",
+      late_crack: "后期结构裂纹，建议尽快分装",
+      uneven: "孔洞分布不均，丙酸菌分散性待提升",
+      collapsed: "孔壁塌陷，疑杂菌污染或湿度过低",
+    };
+    const defects: Defect[] = MOCK_DEFECTS.filter(() => seedRnd() > defectPassRate).map((d, i) => {
+      const angle = seedRnd() * Math.PI * 2;
+      const r = Math.sqrt(seedRnd()) * roiR * 0.92;
+      const conf = 0.55 + seedRnd() * 0.42;
+      return {
+        ...d,
+        id: `d-${batchId}-${i}`,
+        posX: roiCx + Math.cos(angle) * r,
+        posY: roiCy + Math.sin(angle) * r,
+        size: 1.5 + seedRnd() * 2.5,
+        severity: (seedRnd() < 0.25 ? "severe" : seedRnd() < 0.5 ? "medium" : "mild") as SeverityLevel,
+        label: seedRnd() < 0.5 ? d.label : d.label.slice(0, 14),
+        confidence: Math.max(0.35, Math.min(0.99, conf)),
+        description: descMap[d.type],
+      };
+    });
     set({ holes: filtered, defects, detected: true, report: null });
     get().computeAllDiagnosis();
     savePersist({

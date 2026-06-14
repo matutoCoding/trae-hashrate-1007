@@ -79,7 +79,8 @@ export function computeAverageDiameter(holes: Hole[]): number {
 export function generateMockHoles(
   batchId: string,
   seed = 42,
-  count = 78
+  count = 78,
+  roi?: { cx: number; cy: number; radius: number }
 ): Hole[] {
   let s = seed;
   const rnd = () => {
@@ -87,10 +88,15 @@ export function generateMockHoles(
     return s / 233280;
   };
   const holes: Hole[] = [];
+  const roiCx = roi?.cx ?? 0.5;
+  const roiCy = roi?.cy ?? 0.5;
+  const roiR = roi?.radius ?? 0.42;
   for (let i = 0; i < count; i++) {
-    const cx = 0.08 + rnd() * 0.84;
-    const cy = 0.08 + rnd() * 0.84;
-    const dist = Math.hypot(cx - 0.5, cy - 0.5);
+    const angle = rnd() * Math.PI * 2;
+    const r = Math.sqrt(rnd()) * roiR * 0.95;
+    const cx = roiCx + Math.cos(angle) * r;
+    const cy = roiCy + Math.sin(angle) * r;
+    const dist = Math.hypot(cx - roiCx, cy - roiCy) / Math.max(0.0001, roiR);
     const diameterBase =
       rnd() < 0.08
         ? 0.5 + rnd() * 2.5
@@ -107,6 +113,11 @@ export function generateMockHoles(
       ? diameter * 1.2 * (diameter / aspectRatio) * 0.785
       : Math.PI * (diameter / 2) ** 2;
     const category = categorizeHole(diameter, circularity, aspectRatio);
+    const baseConf = 0.6 + rnd() * 0.38;
+    const confidence = Math.max(
+      0.3,
+      Math.min(0.99, baseConf - (isCrack ? 0.1 : 0) - (circularity < 0.4 ? 0.12 : 0))
+    );
     holes.push({
       id: `h-${batchId}-${i}`,
       batchId,
@@ -118,6 +129,7 @@ export function generateMockHoles(
       aspectRatio,
       category,
       isNormal: category !== "crack" && diameter < 28,
+      confidence,
     });
   }
   return holes;
