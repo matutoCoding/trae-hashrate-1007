@@ -120,6 +120,38 @@ export interface SpectrumEntry {
   defectTags: DefectType[];
   grade: Grade;
   previewHoles: Partial<Hole>[];
+  batchId?: string;
+  batchNo?: string;
+  cheeseType?: CheeseType;
+  productionDate?: string;
+  porosityRate?: number;
+  thumbnailData?: string;
+  mainDefectSummary?: string;
+  archivedAt?: string;
+}
+
+export interface CrossSectionImage {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  width: number;
+  height: number;
+  dataUrl: string;
+  uploadedAt: string;
+  source: "upload" | "sample";
+  sampleIndex?: number;
+}
+
+export interface ArchivedBatch {
+  id: string;
+  archivedAt: string;
+  batch: Batch;
+  holes: Hole[];
+  defects: Defect[];
+  diagnosis: Diagnosis;
+  report: Report;
+  image?: CrossSectionImage;
+  thumbnailData: string;
 }
 
 export const HOLE_CATEGORY_THRESHOLDS: Record<HoleCategory, [number, number]> = {

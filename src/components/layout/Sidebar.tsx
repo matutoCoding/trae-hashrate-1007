@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { ClipboardList, Camera, Stethoscope, TrendingUp, Award, Cookie } from "lucide-react";
+import { ClipboardList, Camera, Stethoscope, TrendingUp, Award, Cookie, Archive } from "lucide-react";
 import { useBatchStore } from "../../hooks/useBatchStore";
 
 const NAV_ITEMS = [
@@ -13,6 +13,7 @@ const NAV_ITEMS = [
 export default function Sidebar() {
   const batch = useBatchStore((s) => s.batch);
   const detected = useBatchStore((s) => s.detected);
+  const archiveLen = useBatchStore((s) => s.archive.length);
 
   return (
     <aside className="w-[220px] shrink-0 h-screen bg-cream-card border-r border-cream-border flex flex-col sticky top-0">
@@ -45,6 +46,22 @@ export default function Sidebar() {
             <span className="text-sm opacity-80">{it.emoji}</span>
           </NavLink>
         ))}
+        <div className="h-px bg-cream-border/80 my-2 mx-2" />
+        <NavLink
+          to="/history"
+          className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+        >
+          <div className="relative">
+            <Archive className="w-4 h-4" strokeWidth={1.8} />
+            {archiveLen > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full golden-gradient text-white text-[9px] font-bold flex items-center justify-center leading-none shadow-sm">
+                {archiveLen > 99 ? "99+" : archiveLen}
+              </span>
+            )}
+          </div>
+          <span className="flex-1">历史档案</span>
+          <span className="text-sm opacity-80">🗂️</span>
+        </NavLink>
       </nav>
 
       <div className="mx-3 mb-4 p-3 rounded-md bg-cheese-50/60 border border-cheese-100">

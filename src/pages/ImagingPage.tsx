@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Camera,
@@ -11,17 +11,56 @@ import {
   Grid3x3,
   Circle,
   Hexagon,
+  X,
+  Info,
 } from "lucide-react";
 import { useBatchStore } from "../hooks/useBatchStore";
 import { computeDiameterDistribution, computeAverageDiameter, computeUniformity, computeCVCoefficient } from "../utils/holeAlgorithms";
-import type { HoleCategory } from "../types";
+import type { CrossSectionImage, HoleCategory } from "../types";
 import { HOLE_CATEGORY_LABELS } from "../types";
 import CheeseCrossSection from "../components/imaging/CheeseCrossSection";
 import BarChart from "../components/charts/BarChart";
 
+function computeBrightnessSignature(dataUrl: string): Promise<{ w: number; h: number; sig: number; darkRatio: number }> {
+  return new Promise((resolve) => {
+    const img = document.createElement("img");
+    img.onload = () => {
+      const maxSide = 256;
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return resolve({ w: img.width, h: img.height, sig: 128, darkRatio: 0.3 });
+      ctx.drawImage(img, 0, 0, w, h);
+      const imgData = ctx.getImageData(0, 0, w, h).data;
+      let sum = 0;
+      let darkPx = 0;
+      const total = w * h;
+      for (let i = 0; i < imgData.length; i += 4) {
+        const lum = 0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2];
+        sum += lum;
+        if (lum < 90) darkPx++;
+      }
+      const avg = sum / total;
+      resolve({
+        w: img.width,
+        h: img.height,
+        sig: Math.round(avg),
+        darkRatio: Math.round((darkPx / total) * 200),
+      });
+    };
+    img.onerror = () => resolve({ w: 600, h: 600, sig: 128, darkRatio: 60 });
+    img.src = dataUrl;
+  });
+}
+
 export default function ImagingPage() {
   const nav = useNavigate();
-  const { batch, holes, defects, detected, runDetection, computeAllDiagnosis } = useBatchStore();
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const { batch, holes, defects, detected, runDetection, computeAllDiagnosis, image, setImage } = useBatchStore();
 
   const [threshold, setThreshold] = useState(128);
   const [minDiameter, setMinDiameter] = useState(1.5);
@@ -29,6 +68,10 @@ export default function ImagingPage() {
   const [running, setRunning] = useState(false);
   const [highlight, setHighlight] = useState<HoleCategory | null>(null);
   const [sampleIdx, setSampleIdx] = useState(0);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(image?.dataUrl ?? null);
+  const [previewMeta, setPreviewMeta] = useState<{ size: number; name: string; width?: number; height?: number; sig?: number } | null>(
+    image ? { size: image.fileSize, name: image.fileName, width: image.width, height: image.height } : null
+  );
 
   const samples = ["标准切面示例", "边缘裂隙示例", "中心集孔示例", "超大孔示例"];
 
@@ -45,6 +88,84 @@ export default function ImagingPage() {
     };
   }, [holes]);
 
+  const triggerUpload = () => fileRef.current?.click();
+
+  const handleFile = (f: File) => {
+    if (!f) return;
+    if (!/image\/(jpeg|png|jpg|webp)/i.test(f.type)) {
+      alert("仅支持 JPG / PNG / WEBP 图像");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
+      setPreviewSrc(dataUrl);
+      const { w, h, sig, darkRatio } = await computeBrightnessSignature(dataUrl);
+      const meta: CrossSectionImage = {
+        id: `IMG-${Date.now()}`,
+        fileName: f.name,
+        fileSize: f.size,
+        width: w,
+        height: h,
+        dataUrl,
+        uploadedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+        source: "upload",
+      };
+      setPreviewMeta({ size: f.size, name: f.name, width: w, height: h, sig });
+      setImage(meta, sig * 2 + darkRatio);
+    };
+    reader.readAsDataURL(f);
+  };
+
+  const handleSampleClick = (idx: number) => {
+    setSampleIdx(idx);
+    const brightnessBias = idx * 31 + 47;
+    const w = 800, h = 800;
+    const svgPreview = `data:image/svg+xml;utf8,` + encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}' viewBox='0 0 800 800'>
+        <defs>
+          <radialGradient id='g' cx='50%' cy='46%' r='62%'>
+            <stop offset='0%' stop-color='#F8E6B8'/>
+            <stop offset='65%' stop-color='#DDB972'/>
+            <stop offset='100%' stop-color='#8C5A20'/>
+          </radialGradient>
+        </defs>
+        <rect width='100%' height='100%' fill='#F2E9D8'/>
+        <circle cx='400' cy='400' r='360' fill='url(#g)' stroke='#7A4C1A' stroke-width='4'/>
+        ${Array.from({ length: 42 + idx * 6 }).map((_, i) => {
+          const seed = (i * 73 + idx * 17) % 100;
+          const cx = 80 + (seed * 6.4);
+          const cy = 70 + ((seed * 41) % 680);
+          const r = 3 + ((seed + idx * 7) % 20);
+          const isCrack = idx === 1 && (i % 5 === 0);
+          return isCrack
+            ? `<ellipse cx='${cx}' cy='${cy}' rx='${r * 0.3}' ry='${r * 2.8}' fill='#6B2B3B' opacity='0.75'/>`
+            : `<circle cx='${cx}' cy='${cy}' r='${r}' fill='#4A7C5955' stroke='#2D4A34' stroke-width='0.8'/>`;
+        }).join("")}
+      </svg>`
+    );
+    setPreviewSrc(svgPreview);
+    const sampleMeta: CrossSectionImage = {
+      id: `SMP-${Date.now()}-${idx}`,
+      fileName: samples[idx] + ".svg",
+      fileSize: 12000 + idx * 3000,
+      width: w,
+      height: h,
+      dataUrl: svgPreview,
+      uploadedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+      source: "sample",
+      sampleIndex: idx,
+    };
+    setPreviewMeta({ size: sampleMeta.fileSize, name: sampleMeta.fileName, width: w, height: h, sig: brightnessBias });
+    setImage(sampleMeta, brightnessBias * 2 + (idx + 1) * 11);
+  };
+
+  const clearImage = () => {
+    setPreviewSrc(null);
+    setPreviewMeta(null);
+    setImage(null, 0);
+  };
+
   const handleDetect = () => {
     setRunning(true);
     setProgress(0);
@@ -55,7 +176,8 @@ export default function ImagingPage() {
       if (p >= 95) {
         clearInterval(timer);
         setProgress(100);
-        runDetection(threshold + sampleIdx * 15, minDiameter);
+        const seedBias = (previewMeta?.sig ?? 64) + sampleIdx * 15;
+        runDetection(threshold, minDiameter, seedBias);
         setTimeout(() => {
           setRunning(false);
         }, 300);
@@ -70,6 +192,12 @@ export default function ImagingPage() {
     large: "#D0A962",
     xlarge: "#B33951",
     crack: "#CF536F",
+  };
+
+  const formatSize = (b: number) => {
+    if (b < 1024) return `${b} B`;
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+    return `${(b / 1024 / 1024).toFixed(2)} MB`;
   };
 
   return (
@@ -109,30 +237,77 @@ export default function ImagingPage() {
               切面上图 / 示例选择
             </div>
 
-            <div
-              className="group relative border-2 border-dashed rounded-md p-8 text-center cursor-pointer hover:border-cheese-400 hover:bg-cheese-50/40 transition-all"
-              style={{ borderColor: "#E8DFCD" }}
-              onClick={() => {
-                setSampleIdx((sampleIdx + 1) % samples.length);
+            <input
+              ref={fileRef}
+              type="file"
+              className="hidden"
+              accept="image/jpeg,image/jpg,image/png,image/webp"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+                e.target.value = "";
               }}
-            >
-              <Camera className="w-10 h-10 mx-auto text-cheese-500 mb-3 opacity-80 group-hover:scale-110 transition-transform" />
-              <div className="text-sm font-medium text-cream-text mb-1">
-                点击上传切面照片 · JPG/PNG
+            />
+
+            {!previewSrc ? (
+              <div
+                className="group relative border-2 border-dashed rounded-md p-8 text-center cursor-pointer hover:border-cheese-400 hover:bg-cheese-50/40 transition-all"
+                style={{ borderColor: "#E8DFCD" }}
+                onClick={triggerUpload}
+              >
+                <Camera className="w-10 h-10 mx-auto text-cheese-500 mb-3 opacity-80 group-hover:scale-110 transition-transform" />
+                <div className="text-sm font-medium text-cream-text mb-1">
+                  点击选择本地切面照片 · JPG/PNG
+                </div>
+                <div className="text-xs text-cream-subtext">
+                  或从下方 4 组内置示例图中挑选
+                </div>
+                <div className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-cheese-600 bg-cheese-50 px-2.5 py-1 rounded border border-cheese-200">
+                  <Upload className="w-3 h-3" />
+                  选择文件
+                </div>
               </div>
-              <div className="text-xs text-cream-subtext">
-                或循环切换 4 组内置示例切面图
+            ) : (
+              <div className="relative">
+                <button
+                  onClick={clearImage}
+                  className="absolute top-2 right-2 z-10 w-7 h-7 rounded-full bg-cream-card/90 border border-cream-border flex items-center justify-center text-cream-subtext hover:text-wine-600 hover:border-wine-300 transition-all shadow-sm"
+                  title="清除当前图片"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+                <div className="rounded-md border border-cream-border overflow-hidden bg-cream-surface/60">
+                  <div className="aspect-square flex items-center justify-center p-2">
+                    <img
+                      src={previewSrc}
+                      alt="切面预览"
+                      className="max-w-full max-h-full object-contain rounded-sm"
+                      style={{ maxHeight: 300 }}
+                    />
+                  </div>
+                </div>
+                {previewMeta && (
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-cream-subtext">
+                    <div className="p-2 rounded bg-algae-50/60 border border-algae-200">
+                      <div className="text-algae-700 font-semibold mb-0.5">文件</div>
+                      <div className="truncate" title={previewMeta.name}>{previewMeta.name}</div>
+                    </div>
+                    <div className="p-2 rounded bg-cheese-50/60 border border-cheese-200">
+                      <div className="text-cheese-700 font-semibold mb-0.5">尺寸 / 大小</div>
+                      <div>{previewMeta.width}×{previewMeta.height} / {formatSize(previewMeta.size)}</div>
+                    </div>
+                  </div>
+                )}
               </div>
-              <input type="file" className="hidden" accept="image/*" />
-            </div>
+            )}
 
             <div className="mt-4 grid grid-cols-2 gap-2">
               {samples.map((s, i) => (
                 <button
                   key={s}
-                  onClick={() => setSampleIdx(i)}
+                  onClick={() => handleSampleClick(i)}
                   className={`text-left text-xs px-3 py-2 rounded border transition-all ${
-                    sampleIdx === i
+                    sampleIdx === i && image?.source === "sample" && image.sampleIndex === i
                       ? "bg-cheese-100 border-cheese-400 text-cheese-800 font-semibold shadow-sm"
                       : "bg-cream-surface border-cream-border text-cream-subtext hover:border-cheese-300"
                   }`}
@@ -146,9 +321,22 @@ export default function ImagingPage() {
             <div className="mt-5 p-3 rounded-md bg-algae-50/60 border border-algae-200 text-xs text-algae-700 flex items-start gap-2">
               <Sparkles className="w-4 h-4 shrink-0 mt-0.5" />
               <span>
-                当前示例：<b>{samples[sampleIdx]}</b>（批次 {batch.batchNo} · 熟成 {batch.ripeningDays}d）。调整下方阈值与最小孔径后点击「运行识别」。
+                当前来源：<b>{image?.source === "upload" ? "本地上传" : image?.source === "sample" ? samples[sampleIdx] : "未选择"}</b>
+                （批次 {batch.batchNo} · 熟成 {batch.ripeningDays}d）。调整下方阈值与最小孔径后点击「运行识别」。
               </span>
             </div>
+
+            {previewMeta?.sig !== undefined && (
+              <div className="mt-3 p-2.5 rounded bg-cream-surface/80 border border-cream-border text-[11px] text-cream-subtext flex items-center gap-2">
+                <Info className="w-3.5 h-3.5 text-cheese-600 shrink-0" />
+                <span>
+                  图像特征：平均亮度 <b className="text-cheese-700">{previewMeta.sig}</b>
+                  {previewMeta.sig < 80 && <span className="text-wine-600 ml-1">（偏暗，可能存在裂隙聚集）</span>}
+                  {previewMeta.sig > 140 && <span className="text-algae-700 ml-1">（偏亮，孔洞清晰）</span>}
+                  — 将作为孔洞生成的随机种子
+                </span>
+              </div>
+            )}
           </section>
 
           <section className="cheese-card p-6">

@@ -5,6 +5,7 @@ import ImagingPage from "@/pages/ImagingPage";
 import DiagnosisPage from "@/pages/DiagnosisPage";
 import TrendPage from "@/pages/TrendPage";
 import ReportPage from "@/pages/ReportPage";
+import HistoryPage from "@/pages/HistoryPage";
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="/diagnosis" element={<DiagnosisPage />} />
           <Route path="/trend" element={<TrendPage />} />
           <Route path="/report" element={<ReportPage />} />
+          <Route path="/history" element={<HistoryPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/input" replace />} />
       </Routes>

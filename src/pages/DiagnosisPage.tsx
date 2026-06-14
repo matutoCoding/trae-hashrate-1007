@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Stethoscope,
@@ -11,18 +11,25 @@ import {
   Activity,
   ThermometerSun,
   Search,
+  X,
+  Calendar,
+  FolderOpen,
+  Circle,
 } from "lucide-react";
-import { useBatchStore } from "../hooks/useBatchStore";
+import { useBatchStore, buildSpectrumFromArchive } from "../hooks/useBatchStore";
 import GaugeChart from "../components/charts/GaugeChart";
 import CheeseCrossSection from "../components/imaging/CheeseCrossSection";
-import { MOCK_SPECTRUM } from "../utils/mockData";
 import { riskColor, riskLabel } from "../utils/trendModel";
+import type { SpectrumEntry, Grade, DefectType } from "../types";
+import { riskColor as _rc } from "../utils/trendModel";
 
 export default function DiagnosisPage() {
   const nav = useNavigate();
-  const { batch, holes, defects, diagnosis, computeAllDiagnosis, detected } = useBatchStore();
+  const { batch, holes, defects, diagnosis, computeAllDiagnosis, detected, archive, getArchivedById } = useBatchStore();
+  const [spectrumModal, setSpectrumModal] = useState<SpectrumEntry | null>(null);
 
   const d = diagnosis;
+  const spectrum = useMemo(() => buildSpectrumFromArchive(archive), [archive]);
 
   useMemo(() => {
     if (detected && !d) computeAllDiagnosis();
@@ -395,46 +402,55 @@ export default function DiagnosisPage() {
               缺陷图谱库 · 历史相似缺陷对比
               <span className="ml-auto text-xs font-normal text-cream-subtext flex items-center gap-1">
                 <Search className="w-3.5 h-3.5" />
-                点击缩略图放大对比
+                {archive.length === 0 ? "初始内置 8 张示例图谱" : `已从 ${archive.length} 个归档批次累积生成 ${spectrum.length} 张`}
               </span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-4">
-              {MOCK_SPECTRUM.map((sp) => (
+              {spectrum.map((sp) => (
                 <div
                   key={sp.id}
+                  onClick={() => setSpectrumModal(sp)}
                   className="group cursor-pointer p-3 rounded-md border border-cream-border bg-cream-surface/80 hover:border-cheese-400 hover:shadow-cardHover transition-all"
                 >
                   <div className="aspect-square rounded-md overflow-hidden mb-2 border border-cream-border/70 relative">
-                    <svg viewBox="0 0 100 100" className="w-full h-full">
-                      <defs>
-                        <radialGradient id={`sp-${sp.id}`} cx="50%" cy="45%" r="60%">
-                          <stop offset="0%" stopColor="#F6E3B5" />
-                          <stop offset="70%" stopColor="#DDB972" />
-                          <stop offset="100%" stopColor="#9E7230" />
-                        </radialGradient>
-                      </defs>
-                      <circle cx="50" cy="50" r="44" fill={`url(#sp-${sp.id})`} stroke="#9E7230" strokeWidth="0.8" />
-                      {Array.from({ length: 18 }).map((_, i) => {
-                        const seed = (i * 53 + sp.id.charCodeAt(1)) % 100;
-                        const cx = 15 + (seed * 0.7);
-                        const cy = 12 + ((seed * 37) % 76);
-                        const tagWeight = sp.defectTags.includes("late_crack") ? 0.6 : 1;
-                        const blisterWeight = sp.defectTags.includes("early_blister") ? 1.5 : 1;
-                        const uneven = sp.defectTags.includes("uneven") ? (i < 12 ? 1.8 : 0.3) : 1;
-                        const r = (1 + (seed % 7) * 0.6) * tagWeight * blisterWeight * uneven;
-                        return (
-                          <circle
-                            key={i}
-                            cx={cx}
-                            cy={cy}
-                            r={Math.min(8, r)}
-                            fill={sp.defectTags.includes("collapsed") ? "#6B4025" : "#4A7C5955"}
-                            stroke={tagWeight < 1 ? "#B33951" : "#2D4A34"}
-                            strokeWidth={tagWeight < 1 ? 0.6 : 0.3}
-                          />
-                        );
-                      })}
-                    </svg>
+                    {sp.thumbnailData ? (
+                      <img
+                        src={sp.thumbnailData}
+                        alt={sp.label}
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <svg viewBox="0 0 100 100" className="w-full h-full">
+                        <defs>
+                          <radialGradient id={`sp-${sp.id}`} cx="50%" cy="45%" r="60%">
+                            <stop offset="0%" stopColor="#F6E3B5" />
+                            <stop offset="70%" stopColor="#DDB972" />
+                            <stop offset="100%" stopColor="#9E7230" />
+                          </radialGradient>
+                        </defs>
+                        <circle cx="50" cy="50" r="44" fill={`url(#sp-${sp.id})`} stroke="#9E7230" strokeWidth="0.8" />
+                        {Array.from({ length: 18 }).map((_, i) => {
+                          const seed = (i * 53 + (sp.id.charCodeAt(1) || 50)) % 100;
+                          const cx = 15 + (seed * 0.7);
+                          const cy = 12 + ((seed * 37) % 76);
+                          const tagWeight = sp.defectTags.includes("late_crack") ? 0.6 : 1;
+                          const blisterWeight = sp.defectTags.includes("early_blister") ? 1.5 : 1;
+                          const uneven = sp.defectTags.includes("uneven") ? (i < 12 ? 1.8 : 0.3) : 1;
+                          const r = (1 + (seed % 7) * 0.6) * tagWeight * blisterWeight * uneven;
+                          return (
+                            <circle
+                              key={i}
+                              cx={cx}
+                              cy={cy}
+                              r={Math.min(8, r)}
+                              fill={sp.defectTags.includes("collapsed") ? "#6B4025" : "#4A7C5955"}
+                              stroke={tagWeight < 1 ? "#B33951" : "#2D4A34"}
+                              strokeWidth={tagWeight < 1 ? 0.6 : 0.3}
+                            />
+                          );
+                        })}
+                      </svg>
+                    )}
                     <div
                       className={`absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold text-white ${
                         sp.grade === "A"
@@ -452,7 +468,7 @@ export default function DiagnosisPage() {
                     {sp.defectTags.length === 0 ? (
                       <span className="badge bg-algae-100 text-algae-700 text-[9px]">无缺陷</span>
                     ) : (
-                      sp.defectTags.map((t) => (
+                      sp.defectTags.slice(0, 3).map((t) => (
                         <span
                           key={t}
                           className={`badge text-[9px] ${
@@ -470,11 +486,168 @@ export default function DiagnosisPage() {
                       ))
                     )}
                   </div>
+                  {sp.batchNo && (
+                    <div className="mt-1.5 pt-1.5 border-t border-cream-border/80 flex items-center justify-between text-[9px] text-cream-subtext">
+                      <span className="truncate">{sp.batchNo}</span>
+                      {sp.porosityRate !== undefined && (
+                        <span className="font-mono text-cheese-600">孔率 {sp.porosityRate}%</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           </section>
         </>
+      )}
+
+      {spectrumModal && (
+        <div className="fixed inset-0 z-50 bg-cream-text/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-cream-card rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-cream-border">
+            <div className="px-6 py-4 border-b border-cream-border flex items-center gap-3">
+              <BookOpen className="w-5 h-5 text-cheese-600" />
+              <div className="flex-1 min-w-0">
+                <div className="font-serif text-base font-bold text-cream-text">
+                  {spectrumModal.label}
+                </div>
+                <div className="text-[11px] text-cream-subtext">
+                  {spectrumModal.batchNo
+                    ? `来自批次 ${spectrumModal.batchNo}${spectrumModal.cheeseType ? ` · ${spectrumModal.cheeseType}` : ""}`
+                    : "内置示例图谱"}
+                </div>
+              </div>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-bold text-white ${
+                  spectrumModal.grade === "A"
+                    ? "golden-gradient"
+                    : spectrumModal.grade === "B"
+                    ? "silver-gradient"
+                    : "copper-gradient"
+                }`}
+              >
+                {spectrumModal.grade}级
+              </span>
+              <button
+                onClick={() => setSpectrumModal(null)}
+                className="w-8 h-8 rounded-full border border-cream-border flex items-center justify-center text-cream-subtext hover:text-wine-600 hover:border-wine-300 transition-all"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div>
+                  <div className="text-[11px] font-semibold text-cream-subtext mb-2">切面缩略图</div>
+                  <div className="aspect-square rounded-md overflow-hidden border border-cream-border bg-cream-surface/70">
+                    {spectrumModal.thumbnailData ? (
+                      <img src={spectrumModal.thumbnailData} alt="" className="w-full h-full object-contain" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-cream-subtext text-xs">
+                        <FolderOpen className="w-6 h-6 mr-1 opacity-40" />
+                        无缩略图
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {spectrumModal.batchNo && (
+                    <div className="p-3 rounded-md bg-cheese-50/60 border border-cheese-200 text-xs space-y-1.5">
+                      <div className="flex items-center gap-1.5 text-cheese-700 font-semibold mb-1">
+                        <Circle className="w-3.5 h-3.5" />
+                        对应批次信息
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-cream-subtext">批次号</span>
+                        <span className="font-mono font-medium text-cream-text">{spectrumModal.batchNo}</span>
+                      </div>
+                      {spectrumModal.cheeseType && (
+                        <div className="flex justify-between">
+                          <span className="text-cream-subtext">品种</span>
+                          <span className="font-medium text-cream-text">{spectrumModal.cheeseType}</span>
+                        </div>
+                      )}
+                      {spectrumModal.productionDate && (
+                        <div className="flex justify-between">
+                          <span className="text-cream-subtext">生产日期</span>
+                          <span className="font-medium text-cream-text">{spectrumModal.productionDate}</span>
+                        </div>
+                      )}
+                      {spectrumModal.porosityRate !== undefined && (
+                        <div className="flex justify-between">
+                          <span className="text-cream-subtext">孔洞率</span>
+                          <span className="font-mono font-semibold text-cheese-700">{spectrumModal.porosityRate}%</span>
+                        </div>
+                      )}
+                      {spectrumModal.archivedAt && (
+                        <div className="flex justify-between">
+                          <span className="text-cream-subtext">归档时间</span>
+                          <span className="font-medium text-cream-text text-[11px]">{spectrumModal.archivedAt}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div className="p-3 rounded-md bg-cream-surface/70 border border-cream-border text-xs space-y-2">
+                    <div className="text-cream-subtext font-semibold mb-1">主要缺陷类型</div>
+                    {spectrumModal.mainDefectSummary || spectrumModal.defectTags.length === 0 ? (
+                      <div className="flex items-start gap-1.5">
+                        <AlertTriangle className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${spectrumModal.defectTags.length === 0 ? "text-algae-600" : "text-wine-500"}`} />
+                        <span className="text-cream-text leading-relaxed">
+                          {spectrumModal.mainDefectSummary || (spectrumModal.defectTags.length === 0 ? "无结构缺陷，品相均匀。" : "—")}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(spectrumModal.defectTags as DefectType[]).map((t) => (
+                          <span
+                            key={t}
+                            className={`badge text-[10px] ${
+                              t === "early_blister"
+                                ? "bg-cheese-100 text-cheese-800"
+                                : t === "late_crack"
+                                ? "bg-wine-100 text-wine-700"
+                                : t === "uneven"
+                                ? "bg-[#EAD8B3] text-cheese-800"
+                                : "bg-wine-100 text-wine-700"
+                            }`}
+                          >
+                            {t === "early_blister"
+                              ? "早期胀包·皮下气泡"
+                              : t === "late_crack"
+                              ? "晚期裂纹·结构破损"
+                              : t === "uneven"
+                              ? "孔洞分布不均"
+                              : "孔洞塌陷·杂菌污染"}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-cream-border">
+                {spectrumModal.batchId && (
+                  <button
+                    className="cheese-btn-secondary !py-1.5"
+                    onClick={() => {
+                      nav("/history");
+                      setSpectrumModal(null);
+                    }}
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    查看完整档案
+                  </button>
+                )}
+                <button
+                  className="cheese-btn-primary !py-1.5"
+                  onClick={() => setSpectrumModal(null)}
+                >
+                  关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

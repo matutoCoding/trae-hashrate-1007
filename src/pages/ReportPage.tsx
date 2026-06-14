@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Award,
@@ -13,10 +13,15 @@ import {
   User,
   CalendarDays,
   FileDown,
+  Archive,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 import { useBatchStore } from "../hooks/useBatchStore";
 import RadarChart from "../components/charts/RadarChart";
-import type { Grade } from "../types";
+import CheeseCrossSection from "../components/imaging/CheeseCrossSection";
+import type { Grade, RiskLevel } from "../types";
+import { riskColor, riskLabel } from "../utils/trendModel";
 
 const GRADE_META: Record<
   Grade,
@@ -47,11 +52,23 @@ const GRADE_META: Record<
 
 export default function ReportPage() {
   const nav = useNavigate();
-  const { batch, holes, defects, diagnosis, report, detected, generateReport, resetBatch } =
-    useBatchStore();
+  const {
+    batch,
+    holes,
+    defects,
+    diagnosis,
+    report,
+    detected,
+    generateReport,
+    resetBatch,
+    image,
+    archiveAndNew,
+    imageBrightnessSignature,
+  } = useBatchStore();
 
   const [inspector, setInspector] = useState("张师傅");
   const [printing, setPrinting] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   useEffect(() => {
     if (detected && !report) {
@@ -90,6 +107,35 @@ export default function ReportPage() {
   const radar = report.radarScores;
   const d = diagnosis;
 
+  const firstStageTemp = batch.tempHumidityStages[0]?.temperature ?? 14;
+  const firstStageHum = batch.tempHumidityStages[0]?.humidity ?? 85;
+
+  const riskLv = useMemo<RiskLevel>(() => {
+    if (report.totalScore >= 85) return "green";
+    if (report.totalScore >= 70) return "yellow";
+    return "orange";
+  }, [report.totalScore]);
+
+  const shippingSuggestion = useMemo(() => {
+    const { porosityRate, avgDiameter, crackCount, porosityTargetMin, porosityTargetMax, blisterCount } = d;
+    if (report.grade === "A" && porosityRate >= porosityTargetMin && porosityRate <= porosityTargetMax && crackCount === 0) {
+      return { action: "建议立即出货", detail: "品相卓越，孔洞达标且无结构性缺陷，无需延长熟成，建议分装销售。", tone: "出货" };
+    }
+    if (porosityRate < porosityTargetMin && avgDiameter < 4) {
+      return { action: "建议延长熟成 3-7 天", detail: `孔洞率 ${porosityRate}% 偏低、平均孔径 ${avgDiameter}mm 偏小，丙酸菌产气尚未充分。可置于 ${firstStageTemp + 0.5}℃ / ${firstStageHum}%RH 环境继续熟成观察。`, tone: "继续熟成" };
+    }
+    if (porosityRate > porosityTargetMax + 3 || blisterCount > 2) {
+      return { action: "建议立即出货", detail: `孔洞率已达 ${porosityRate}%${blisterCount > 2 ? "且存在早期皮下胀包" : ""}，若继续熟成有过度发酵与胀包破裂风险，建议尽快分装销售。`, tone: "出货" };
+    }
+    if (crackCount >= 3) {
+      return { action: "建议尽快分装出货", detail: `检出 ${crackCount} 处晚期裂纹结构缺陷，继续熟成可能导致裂纹扩大、风味异常，建议尽快分装或降级为加工用。`, tone: "出货" };
+    }
+    if (report.grade === "C") {
+      return { action: "建议降级出货 / 加工用", detail: "综合品相未达市场流通标准，建议降级为加工用奶酪或内部消化使用。", tone: "降级" };
+    }
+    return { action: "建议继续观察 3 天", detail: `综合品相尚可（${report.grade}级），可维持当前温湿度条件再观察 3 天，复查孔洞形态后决定出货。`, tone: "观察" };
+  }, [d, report.grade, firstStageTemp, firstStageHum]);
+
   const handlePrint = () => {
     setPrinting(true);
     setTimeout(() => {
@@ -98,51 +144,176 @@ export default function ReportPage() {
     }, 300);
   };
 
+  const generateThumbnail = (): string => {
+    if (image?.dataUrl) return image.dataUrl;
+    try {
+      const W = 260;
+      const svgNS = "http://www.w3.org/2000/svg";
+      const root = document.createElementNS(svgNS, "svg");
+      root.setAttribute("xmlns", svgNS);
+      root.setAttribute("width", String(W));
+      root.setAttribute("height", String(W));
+      root.setAttribute("viewBox", "0 0 260 260");
+
+      const bg = document.createElementNS(svgNS, "defs");
+      bg.innerHTML = `<radialGradient id="tt-cheese" cx="50%" cy="45%" r="60%">
+        <stop offset="0%" stop-color="#F6E3B5"/>
+        <stop offset="70%" stop-color="#DDB972"/>
+        <stop offset="100%" stop-color="#9E7230"/>
+      </radialGradient>`;
+      root.appendChild(bg);
+
+      const cx = W / 2;
+      const cy = W / 2;
+      const rad = W * 0.42;
+
+      const main = document.createElementNS(svgNS, "circle");
+      main.setAttribute("cx", String(cx));
+      main.setAttribute("cy", String(cy));
+      main.setAttribute("r", String(rad));
+      main.setAttribute("fill", "url(#tt-cheese)");
+      main.setAttribute("stroke", "#9E7230");
+      main.setAttribute("stroke-width", "1.5");
+      root.appendChild(main);
+
+      const N = Math.min(42, holes.length || 30);
+      for (let i = 0; i < N; i++) {
+        const h = holes[i];
+        const fallback = {
+          centerX: 15 + (i * 113) % 70,
+          centerY: 12 + (i * 89) % 76,
+          diameter: 2 + (i % 6),
+          category: "medium" as const,
+          isNormal: true,
+        };
+        const centerX = h ? (h as any).centerX ?? fallback.centerX : fallback.centerX;
+        const centerY = h ? (h as any).centerY ?? fallback.centerY : fallback.centerY;
+        const diameter = h ? (h as any).diameter ?? fallback.diameter : fallback.diameter;
+        const isCrack = h ? (h as any).category === "crack" : false;
+        const isBlister = h ? (h as any).isNormal === false && !isCrack && diameter > 10 : false;
+        const collapsed = h ? (h as any).circularity !== undefined && (h as any).circularity < 0.3 : false;
+        const px = (centerX / 100) * (rad * 2) + (cx - rad);
+        const py = (centerY / 100) * (rad * 2) + (cy - rad);
+        const rr = Math.max(0.8, (diameter / 22) * rad * 0.28);
+        const c = document.createElementNS(svgNS, "circle");
+        c.setAttribute("cx", String(px));
+        c.setAttribute("cy", String(py));
+        c.setAttribute("r", String(rr));
+        c.setAttribute(
+          "fill",
+          collapsed ? "#6B4025" : isBlister ? "#E8912B99" : "#4A7C5980"
+        );
+        c.setAttribute("stroke", isCrack ? "#B33951" : "#2D4A34");
+        c.setAttribute("stroke-width", isCrack ? "0.7" : "0.35");
+        root.appendChild(c);
+      }
+
+      const svgStr = new XMLSerializer().serializeToString(root);
+      return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgStr);
+    } catch {
+      return "";
+    }
+  };
+
   const handleExport = () => {
+    const brSign = imageBrightnessSignature
+      ? `图像亮度特征值: ${imageBrightnessSignature.toFixed(2)} · 识别seed基准: ${(imageBrightnessSignature * 2 + (d.porosityRate || 0)).toFixed(1)}`
+      : "图像亮度特征值: 未启用真实图像识别，基于示例图seed";
+    const imgSrcTxt = image
+      ? `来源: ${image.source === "upload" ? "本地上传" : "示例图库"} · ${image.fileName || ""} · ${image.width || 0}×${image.height || 0}px · ${(image.fileSize || 0) / 1024 | 0}KB`
+      : "来源: 未关联原始切面图";
+    const defectTags = defects.slice(0, 6).map((x, i) => `    #${i + 1} [${x.type === "early_blister" ? "早期胀包" : x.type === "late_crack" ? "晚期裂纹" : x.type === "collapsed" ? "孔洞塌陷" : "分布不均"}] 定位(${x.posX.toFixed(1)},${x.posY.toFixed(1)}) 严重度 ${x.label}`).join("\n");
+    const acidLevel = batch.pH < 5.4 ? "偏高(促进杂菌抑制)" : batch.pH > 5.8 ? "偏低(需防杂菌)" : "适中";
+    const inhibScore = d.contaminationRisk === "green" ? 92 : d.contaminationRisk === "yellow" ? 74 : d.contaminationRisk === "orange" ? 56 : 38;
     const content = `
 乳测工坊 · 奶酪孔洞分级质量报告
 ======================================
+【基础信息】
 批次编号: ${batch.batchNo}
 奶酪品种: ${batch.cheeseType}
 生产日期: ${batch.productionDate}
 熟成天数: ${batch.ripeningDays} 天
 接种菌株: ${batch.strain}
+盐度: ${batch.salinity}%   酸度(pH): ${batch.pH} (${acidLevel})
+熟成环境: ${firstStageTemp}℃ / ${firstStageHum}%RH
+理论产气量: ${batch.theoreticalGas} L   实测产气量: ${batch.measuredGas} L
 综合得分: ${report.totalScore} / 100
-评定等级: ${report.grade} (${gm.name})
+评定等级: ${report.grade} (${gm.name})  ·  ${gm.sub}
+风险等级: ${riskLv.toUpperCase()} (${riskLabel(riskLv)})
 签发日期: ${report.issuedAt}
 质检人员: ${report.inspector}
---------------------------------------
-关键指标
-  孔洞率: ${d.porosityRate}% (目标 ${d.porosityTargetMin}~${d.porosityTargetMax}%) ${d.porosityPass ? "达标" : "未达标"}
-  丙酸菌活性: ${d.propionibacteriumActivity}
-  正常气孔数: ${d.normalHoleCount}
-  裂隙数: ${d.crackCount}
-  胀包数: ${d.blisterCount}
-  平均孔径: ${d.avgDiameter}mm
-  均匀度: ${d.uniformityScore}分
---------------------------------------
-品相雷达得分
+
+======================================
+【图像识别摘要】
+图像文件: ${imgSrcTxt}
+${brSign}
+孔洞统计:
+  孔洞率: ${d.porosityRate}% (目标区间 ${d.porosityTargetMin}~${d.porosityTargetMax}%)  → ${d.porosityPass ? "达标 ✅" : "未达标 ⚠️"}
+  正常气孔数: ${d.normalHoleCount}   裂隙数: ${d.crackCount}   胀包数: ${d.blisterCount}
+  平均孔径: ${d.avgDiameter}mm   变异系数(CV): ${(d.cvCoefficient ?? d.avgDiameter * 0.22).toFixed(1)}
+  均匀度(Gini): ${d.uniformityScore}/100   盐酸度杂菌抑制: ${inhibScore}/100
+  丙酸菌活性指数: ${d.propionibacteriumActivity}/100
+  检出缺陷 ${defects.length} 条:
+${defectTags || "    (无结构缺陷检出)"}
+
+======================================
+【趋势预测结论】
+丙酸菌活跃期判断:
+  · 第 ${1 + Math.round(d.propionibacteriumActivity / 25)} 阶段(${d.propionibacteriumActivity >= 75 ? "产气峰期" : d.propionibacteriumActivity >= 50 ? "扩张期" : "启动期"})
+  · 孔洞形成对应熟成时间: 第 ${Math.max(1, batch.ripeningDays - 10)} 天起开始发育
+  · Logistic增长斜率估算: k≈${(0.03 + 0.0008 * (d.propionibacteriumActivity || 60)).toFixed(4)}
+熟成延长 7 天预测:
+  · 预计孔洞率: ≈${Math.min(35, d.porosityRate + 2.5 + (d.propionibacteriumActivity || 60) * 0.02).toFixed(1)}%
+  · 预计平均孔径: ≈${(d.avgDiameter + 0.8).toFixed(1)}mm
+  · 胀包风险变化: ${d.blisterCount > 1 ? "🔺 有加剧趋势，需降低 0.5℃" : "➖ 可控"}
+  · 裂纹风险变化: ${d.crackCount > 1 ? "🔺 有扩大趋势" : "➖ 可控"}
+
+======================================
+【品相雷达得分 (满分100)】
   孔洞率: ${radar.porosity}
   均匀度: ${radar.uniformity}
   正常占比: ${radar.normalRatio}
   无缺陷率: ${radar.defectFree}
   尺寸达标: ${radar.sizeTarget}
   色泽一致: ${radar.color}
---------------------------------------
-诊断结论
-${report.conclusion}
---------------------------------------
-改进建议
-${report.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
 ======================================
+【综合诊断结论】
+${report.conclusion}
+
+======================================
+【出货 / 熟成决策建议】
+★ 决策结论: 【${shippingSuggestion.tone}】${shippingSuggestion.action}
+  说明: ${shippingSuggestion.detail}
+
+======================================
+【持续改进建议】
+${report.suggestions.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}
+
+======================================
+本报告由「乳测工坊 · 手工奶酪孔洞质量诊断系统」自动生成
+报告编号: RPT-${batch.batchNo}-${report.grade}    签发: ${report.issuedAt}
 `.trim();
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${batch.batchNo}_奶酪分级报告.txt`;
+    a.download = `${batch.batchNo}_奶酪分级报告_含图像摘要.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleArchiveAndNew = async () => {
+    if (archiving) return;
+    setArchiving(true);
+    try {
+      const thumb = generateThumbnail();
+      await new Promise(r => setTimeout(r, 120));
+      archiveAndNew(thumb || undefined);
+      setTimeout(() => nav("/history"), 100);
+    } finally {
+      setArchiving(false);
+    }
   };
 
   return (
@@ -174,15 +345,34 @@ ${report.suggestions.map((s, i) => `${i + 1}. ${s}`).join("\n")}
             导出 TXT
           </button>
           <button
-            className="cheese-btn-primary"
+            className="cheese-btn-secondary"
             onClick={() => {
-              resetBatch();
-              nav("/");
+              if (confirm("确认要丢弃当前批次数据（不归档）并开始新批次吗？")) {
+                resetBatch();
+                nav("/");
+              }
             }}
           >
-            <Save className="w-4 h-4" />
-            入档并开启新批次
-            <ArrowRight className="w-4 h-4" />
+            <RefreshCw className="w-4 h-4" />
+            丢弃·新批次
+          </button>
+          <button
+            className="cheese-btn-primary"
+            onClick={handleArchiveAndNew}
+            disabled={archiving}
+          >
+            {archiving ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                正在归档…
+              </>
+            ) : (
+              <>
+                <Archive className="w-4 h-4" />
+                入档并开启新批次
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </div>
       </header>
