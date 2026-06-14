@@ -49,6 +49,7 @@ interface PersistSnapshot {
   report: Report | null;
   detected: boolean;
   image: CrossSectionImage | null;
+  imageBrightnessSignature: number;
 }
 
 function loadPersist(): PersistSnapshot | null {
@@ -203,7 +204,7 @@ export const useBatchStore = create<BatchState>((set, get) => ({
   detected: initial?.detected ?? false,
   image: initial?.image ?? null,
   archive: loadArchive(),
-  imageBrightnessSignature: 0,
+  imageBrightnessSignature: initial?.imageBrightnessSignature ?? 0,
 
   setBatch: (key, value) =>
     set((s) => {
@@ -219,6 +220,7 @@ export const useBatchStore = create<BatchState>((set, get) => ({
         report: null,
         detected: s.detected,
         image: s.image,
+        imageBrightnessSignature: s.imageBrightnessSignature,
       });
       return { batch: newBatch, report: null };
     }),
@@ -240,6 +242,7 @@ export const useBatchStore = create<BatchState>((set, get) => ({
         report: s.report,
         detected: s.detected,
         image: s.image,
+        imageBrightnessSignature: s.imageBrightnessSignature,
       });
       return { batch: newBatch };
     }),
@@ -260,6 +263,7 @@ export const useBatchStore = create<BatchState>((set, get) => ({
         report: s.report,
         detected: s.detected,
         image: s.image,
+        imageBrightnessSignature: s.imageBrightnessSignature,
       });
       return { batch: newBatch };
     }),
@@ -278,6 +282,7 @@ export const useBatchStore = create<BatchState>((set, get) => ({
         report: s.report,
         detected: s.detected,
         image: s.image,
+        imageBrightnessSignature: s.imageBrightnessSignature,
       });
       return { batch: newBatch };
     }),
@@ -292,6 +297,7 @@ export const useBatchStore = create<BatchState>((set, get) => ({
         report: s.report,
         detected: s.detected,
         image: img,
+        imageBrightnessSignature: brightnessSig,
       });
       return { image: img, imageBrightnessSignature: brightnessSig };
     }),
@@ -314,13 +320,14 @@ export const useBatchStore = create<BatchState>((set, get) => ({
       report: null,
       detected: true,
       image: get().image,
+      imageBrightnessSignature: get().imageBrightnessSignature,
     });
   },
 
   computeAllDiagnosis: () => {
     const { batch, holes, defects } = get();
     if (holes.length === 0) {
-      get().runDetection();
+      set({ diagnosis: null, report: null });
       return;
     }
     const d = buildInitialDiagnosis(batch, holes, defects);
@@ -333,6 +340,7 @@ export const useBatchStore = create<BatchState>((set, get) => ({
       report: null,
       detected: get().detected,
       image: get().image,
+      imageBrightnessSignature: get().imageBrightnessSignature,
     });
   },
 
@@ -381,11 +389,12 @@ export const useBatchStore = create<BatchState>((set, get) => ({
       report,
       detected: get().detected,
       image: get().image,
+      imageBrightnessSignature: get().imageBrightnessSignature,
     });
   },
 
   archiveAndNew: (thumbnail) => {
-    const { batch, holes, defects, diagnosis, report, image } = get();
+    const { batch, holes, defects, diagnosis, report, image, imageBrightnessSignature } = get();
     if (!diagnosis || !report) {
       alert("请先生成分级报告后再入档");
       return null;
@@ -416,7 +425,16 @@ export const useBatchStore = create<BatchState>((set, get) => ({
       image: null,
       imageBrightnessSignature: 0,
     });
-    localStorage.removeItem(STORAGE_KEY);
+    savePersist({
+      batch: newBatch,
+      holes: [],
+      defects: [],
+      diagnosis: null,
+      report: null,
+      detected: false,
+      image: null,
+      imageBrightnessSignature: 0,
+    });
     return id;
   },
 
@@ -425,6 +443,7 @@ export const useBatchStore = create<BatchState>((set, get) => ({
   loadArchived: (id) => {
     const a = get().archive.find((x) => x.id === id);
     if (!a) return;
+    const brightSig = 0;
     set({
       batch: { ...a.batch },
       holes: [...a.holes],
@@ -433,6 +452,7 @@ export const useBatchStore = create<BatchState>((set, get) => ({
       report: { ...a.report },
       detected: true,
       image: a.image ? { ...a.image } : null,
+      imageBrightnessSignature: brightSig,
     });
     savePersist({
       batch: { ...a.batch },
@@ -442,6 +462,7 @@ export const useBatchStore = create<BatchState>((set, get) => ({
       report: { ...a.report },
       detected: true,
       image: a.image ? { ...a.image } : null,
+      imageBrightnessSignature: brightSig,
     });
   },
 
@@ -463,6 +484,15 @@ export const useBatchStore = create<BatchState>((set, get) => ({
       image: null,
       imageBrightnessSignature: 0,
     });
-    localStorage.removeItem(STORAGE_KEY);
+    savePersist({
+      batch: newBatch,
+      holes: [],
+      defects: [],
+      diagnosis: null,
+      report: null,
+      detected: false,
+      image: null,
+      imageBrightnessSignature: 0,
+    });
   },
 }));

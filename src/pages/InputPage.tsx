@@ -24,7 +24,6 @@ export default function InputPage() {
     updateTempStage,
     removeTempStage,
     resetBatch,
-    runDetection,
   } = useBatchStore();
 
   const contamHint = (() => {
@@ -60,7 +59,6 @@ export default function InputPage() {
           <button
             className="cheese-btn-primary"
             onClick={() => {
-              runDetection();
               nav("/imaging");
             }}
           >
@@ -432,7 +430,6 @@ export default function InputPage() {
         <button
           className="cheese-btn-primary"
           onClick={() => {
-            runDetection();
             nav("/imaging");
           }}
         >

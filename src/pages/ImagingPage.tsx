@@ -60,7 +60,8 @@ function computeBrightnessSignature(dataUrl: string): Promise<{ w: number; h: nu
 export default function ImagingPage() {
   const nav = useNavigate();
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const { batch, holes, defects, detected, runDetection, computeAllDiagnosis, image, setImage } = useBatchStore();
+  const { batch, holes, defects, detected, runDetection, computeAllDiagnosis, image, setImage, diagnosis } = useBatchStore();
+  const d = diagnosis;
 
   const [threshold, setThreshold] = useState(128);
   const [minDiameter, setMinDiameter] = useState(1.5);
@@ -421,16 +422,180 @@ export default function ImagingPage() {
               <Circle className="w-5 h-5 text-algae-600" />
               切面成像识别视图
               <span className="ml-auto text-xs font-normal text-cream-subtext">
-                {detected ? `共检出 ${holes.length} 个对象` : "等待运行识别"}
+                {!previewSrc && !detected
+                  ? "等待选择切面照片"
+                  : previewSrc && !detected
+                  ? "点击「运行孔洞识别」开始分析"
+                  : detected
+                  ? `共检出 ${holes.length} 个对象${previewSrc ? "（叠加在原图）" : "（系统示意）"}`
+                  : ""}
               </span>
             </div>
+
             <div className="flex items-center justify-center py-2">
-              <CheeseCrossSection
-                holes={holes}
-                defects={defects}
-                highlightCategory={highlight}
-                size={520}
-              />
+              {!previewSrc && !detected ? (
+                <div className="aspect-square w-full max-w-[520px] rounded-md border-2 border-dashed border-cream-border bg-cream-surface/60 flex flex-col items-center justify-center text-center p-10 gap-3">
+                  <Circle className="w-12 h-12 text-cheese-300 opacity-70" />
+                  <div className="text-sm font-medium text-cream-subtext">
+                    尚未选择切面照片
+                  </div>
+                  <div className="text-xs text-cream-subtext/80 max-w-sm leading-relaxed">
+                    请在左侧上传本地 JPG/PNG 切面照片，或点击下方示例图，然后点「运行孔洞识别」开始分析。
+                  </div>
+                </div>
+              ) : (
+                <div className="relative aspect-square w-full max-w-[560px] rounded-md overflow-hidden border border-cream-border bg-cream-surface/80 shadow-sm">
+                  {previewSrc ? (
+                    <img
+                      src={previewSrc}
+                      alt="切面原图"
+                      className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+                      draggable={false}
+                    />
+                  ) : detected ? (
+                    <CheeseCrossSection
+                      holes={holes}
+                      defects={defects}
+                      highlightCategory={highlight}
+                      size={560}
+                    />
+                  ) : null}
+
+                  {detected && previewSrc && holes.length > 0 && (
+                    <svg
+                      viewBox="0 0 100 100"
+                      preserveAspectRatio="none"
+                      className="absolute inset-0 w-full h-full pointer-events-none select-none"
+                    >
+                      {holes.map((h) => {
+                        const isCrack = h.category === "crack";
+                        const show = !highlight || highlight === h.category;
+                        if (!show) return null;
+                        const cx = h.centerX;
+                        const cy = h.centerY;
+                        const sizeFactor = 0.32;
+                        const rx = Math.max(
+                          0.4,
+                          (isCrack ? (h.diameter + 3) * 0.35 : h.diameter / 2) * sizeFactor
+                        );
+                        const ry = isCrack
+                          ? 0.5
+                          : Math.max(0.35, (h.diameter / 2) * sizeFactor * (0.85 + ((h.aspectRatio || 1) - 1) * 0.6));
+                        const normal = h.isNormal && !isCrack;
+                        const fillColor = normal
+                          ? "rgba(74, 124, 89, 0.18)"
+                          : isCrack
+                          ? "rgba(179, 57, 81, 0.08)"
+                          : "rgba(201, 166, 107, 0.22)";
+                        const strokeColor = isCrack
+                          ? "#B33951"
+                          : h.category === "micro"
+                          ? "#2D6A4F"
+                          : normal
+                          ? "#4A7C59"
+                          : "#9E7230";
+                        const sw = isCrack ? 0.45 : 0.35;
+                        return (
+                          <g key={h.id}>
+                            {isCrack ? (
+                              <g>
+                                <line
+                                  x1={cx - rx}
+                                  y1={cy - ry * 0.4}
+                                  x2={cx + rx}
+                                  y2={cy + ry * 0.4}
+                                  stroke={strokeColor}
+                                  strokeWidth={sw}
+                                  strokeLinecap="round"
+                                />
+                                <line
+                                  x1={cx - rx * 0.8}
+                                  y1={cy + ry * 0.1}
+                                  x2={cx + rx * 0.6}
+                                  y2={cy - ry * 0.5}
+                                  stroke={strokeColor}
+                                  strokeWidth={sw * 0.8}
+                                  strokeLinecap="round"
+                                  opacity={0.85}
+                                />
+                                <rect
+                                  x={cx - rx}
+                                  y={cy - 0.8}
+                                  width={rx * 2}
+                                  height={1.6}
+                                  fill="none"
+                                  stroke="#B33951"
+                                  strokeDasharray="0.8,0.4"
+                                  strokeWidth={0.25}
+                                  opacity={0.7}
+                                />
+                              </g>
+                            ) : (
+                              <ellipse
+                                cx={cx}
+                                cy={cy}
+                                rx={rx}
+                                ry={ry}
+                                fill={fillColor}
+                                stroke={strokeColor}
+                                strokeWidth={sw}
+                                opacity={0.95}
+                              />
+                            )}
+                          </g>
+                        );
+                      })}
+
+                      {defects.map((d) => {
+                        const cx = d.posX;
+                        const cy = d.posY;
+                        const isBlister = d.type === "early_blister";
+                        const r = isBlister ? 2.6 : 2.1;
+                        return (
+                          <g key={d.id}>
+                            <circle
+                              cx={cx}
+                              cy={cy}
+                              r={r}
+                              fill="none"
+                              stroke={isBlister ? "#E8912B" : "#B33951"}
+                              strokeWidth={0.5}
+                              strokeDasharray="1,0.4"
+                            />
+                            <circle
+                              cx={cx}
+                              cy={cy}
+                              r={0.6}
+                              fill={isBlister ? "#E8912B" : "#B33951"}
+                            />
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  )}
+
+                  {detected && previewSrc && (
+                    <div className="absolute top-2 left-2 flex flex-col gap-1">
+                      <div className="px-2 py-1 rounded bg-cream-card/92 backdrop-blur-[1px] border border-cream-border text-[10px] text-cream-text shadow-sm flex items-center gap-1.5">
+                        <span className="inline-block w-2.5 h-2.5 rounded-full border border-[#4A7C59] bg-[#4A7C59]/30" />
+                        正常气孔 {d?.normalHoleCount ?? 0}
+                      </div>
+                      {(d?.crackCount ?? 0) > 0 && (
+                        <div className="px-2 py-1 rounded bg-cream-card/92 backdrop-blur-[1px] border border-cream-border text-[10px] text-cream-text shadow-sm flex items-center gap-1.5">
+                          <span className="inline-block w-2.5 h-0.5 bg-[#B33951] rounded" />
+                          裂隙 {d.crackCount}
+                        </div>
+                      )}
+                      {(d?.blisterCount ?? 0) > 0 && (
+                        <div className="px-2 py-1 rounded bg-cream-card/92 backdrop-blur-[1px] border border-cream-border text-[10px] text-cream-text shadow-sm flex items-center gap-1.5">
+                          <span className="inline-block w-2.5 h-2.5 rounded-full border border-dashed border-[#E8912B]" />
+                          胀包 {d.blisterCount}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="mt-4 pt-4 border-t border-cream-border">
