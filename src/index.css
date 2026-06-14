@@ -1,0 +1,140 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Serif+SC:wght@500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background-color: #faf6ef;
+  color: #2b2a27;
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #e8dfcd;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #c9a66b;
+}
+
+@layer components {
+  .cheese-card {
+    @apply bg-cream-card border border-cream-border rounded-md shadow-card transition-all duration-200 hover:shadow-cardHover hover:-translate-y-0.5;
+  }
+
+  .cheese-input {
+    @apply w-full px-3 py-2 bg-cream-surface border border-cream-border rounded text-sm text-cream-text placeholder:text-cream-subtext/60 focus:outline-none focus:border-cheese-400 focus:ring-1 focus:ring-cheese-300 transition-colors;
+  }
+
+  .cheese-select {
+    @apply w-full px-3 py-2 bg-cream-surface border border-cream-border rounded text-sm text-cream-text focus:outline-none focus:border-cheese-400 focus:ring-1 focus:ring-cheese-300 transition-colors appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20viewBox=%270%200%2020%2020%27%20fill=%27%236B655A%27%3e%3cpath%20d=%27M5.23%207.21a.75.75%200%20011.06.02L10%2011.068l3.71-3.838a.75.75%200%20111.08%201.04l-4.25%204.4a.75.75%200%2001-1.08%200l-4.25-4.4a.75.75%200%2001.02-1.06z%27/%3e%3c/svg%3e')] bg-no-repeat bg-[right_10px_center] bg-[length:16px_16px] pr-9;
+  }
+
+  .cheese-btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded text-sm font-medium transition-all duration-200;
+  }
+
+  .cheese-btn-primary {
+    @apply cheese-btn bg-cheese-500 text-white hover:bg-cheese-600 active:bg-cheese-700 shadow-sm hover:shadow-md hover:-translate-y-0.5 border border-cheese-600/40;
+  }
+
+  .cheese-btn-secondary {
+    @apply cheese-btn bg-cream-surface text-cream-text border border-cream-border hover:border-cheese-400 hover:text-cheese-700 hover:-translate-y-0.5;
+  }
+
+  .cheese-btn-algae {
+    @apply cheese-btn bg-algae-500 text-white hover:bg-algae-600 shadow-sm hover:shadow-md hover:-translate-y-0.5 border border-algae-600/40;
+  }
+
+  .cheese-btn-wine {
+    @apply cheese-btn bg-wine-500 text-white hover:bg-wine-600 shadow-sm hover:shadow-md hover:-translate-y-0.5 border border-wine-600/40;
+  }
+
+  .section-title {
+    @apply font-serif text-xl font-semibold text-cream-text flex items-center gap-2 pb-2 mb-4 border-b border-cream-border;
+  }
+
+  .section-title::before {
+    content: "";
+    @apply inline-block w-2 h-2 rounded-full bg-algae-500 shrink-0;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-3 text-sm text-cream-subtext rounded transition-all duration-200 relative;
+  }
+
+  .nav-item:hover {
+    @apply text-cream-text bg-cheese-50/60;
+  }
+
+  .nav-item.active {
+    @apply text-cheese-800 font-semibold bg-cheese-100/70;
+  }
+
+  .nav-item.active::before {
+    content: "";
+    @apply absolute left-0 top-2 bottom-2 w-0.5 bg-cheese-500 rounded-r;
+  }
+
+  .golden-gradient {
+    background: linear-gradient(135deg, #f5d99a 0%, #d4a64e 50%, #b8860b 100%);
+  }
+  .silver-gradient {
+    background: linear-gradient(135deg, #eaeaea 0%, #b8b8b8 50%, #8e8e8e 100%);
+  }
+  .copper-gradient {
+    background: linear-gradient(135deg, #e5b88a 0%, #c87533 50%, #8e4a1a 100%);
+  }
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: #e8dfcd;
+  border-radius: 3px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: #c9a66b;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(201, 166, 107, 0.5);
+  transition: transform 0.15s;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: #c9a66b;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(201, 166, 107, 0.5);
+}
