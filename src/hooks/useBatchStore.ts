@@ -12,6 +12,7 @@ import type {
   SpectrumEntry,
   DefectType,
   Grade,
+  SeverityLevel,
 } from "../types";
 import { DEFAULT_BATCH, MOCK_DEFECTS, generateBatchNo, MOCK_SPECTRUM } from "../utils/mockData";
 import {
@@ -182,6 +183,7 @@ interface BatchState {
   updateTempStage: (i: number, patch: Partial<TempHumidityStage>) => void;
   removeTempStage: (i: number) => void;
   setImage: (img: CrossSectionImage | null, brightnessSig?: number) => void;
+  clearDetection: () => void;
   runDetection: (threshold?: number, minDiameter?: number, seedBias?: number) => void;
   computeAllDiagnosis: () => void;
   generateReport: (inspector?: string) => void;
@@ -302,14 +304,49 @@ export const useBatchStore = create<BatchState>((set, get) => ({
       return { image: img, imageBrightnessSignature: brightnessSig };
     }),
 
+  clearDetection: () =>
+    set((s) => {
+      const state = {
+        holes: [],
+        defects: [],
+        diagnosis: null,
+        report: null,
+        detected: false,
+      };
+      savePersist({
+        batch: s.batch,
+        holes: [],
+        defects: [],
+        diagnosis: null,
+        report: null,
+        detected: false,
+        image: s.image,
+        imageBrightnessSignature: s.imageBrightnessSignature,
+      });
+      return state;
+    }),
+
   runDetection: (threshold = 128, minDiameter = 1.5, seedBias = 0) => {
     const batchId = get().batch.id;
     const brightness = get().imageBrightnessSignature;
-    const seed = Math.floor(threshold * 3 + minDiameter * 57 + batchId.length * 11 + seedBias + brightness);
+    const seed = Math.floor(threshold * 3 + minDiameter * 57 + batchId.length * 11 + seedBias + brightness * 1.7);
     const holes = generateMockHoles(batchId, seed, 72 + Math.floor(threshold / 10) + Math.floor(brightness / 2));
     const filtered = holes.filter((h) => h.diameter >= minDiameter);
     const defectPassRate = 0.35 + (brightness > 128 ? 0.08 : brightness < 80 ? -0.08 : 0);
-    const defects = MOCK_DEFECTS.filter((d) => Math.random() > defectPassRate || d.severity !== "severe");
+    let s = seed * 7907 + 12345;
+    const seedRnd = () => {
+      s = (s * 9301 + 49297) % 233280;
+      return s / 233280;
+    };
+    const defects: Defect[] = MOCK_DEFECTS.filter(() => seedRnd() > defectPassRate).map((d, i) => ({
+      ...d,
+      id: `d-${batchId}-${i}`,
+      posX: 0.08 + seedRnd() * 0.84,
+      posY: 0.08 + seedRnd() * 0.84,
+      size: 1.5 + seedRnd() * 2.5,
+      severity: (seedRnd() < 0.25 ? "severe" : seedRnd() < 0.5 ? "medium" : "mild") as SeverityLevel,
+      label: seedRnd() < 0.5 ? d.label : d.label.slice(0, 14),
+    }));
     set({ holes: filtered, defects, detected: true, report: null });
     get().computeAllDiagnosis();
     savePersist({

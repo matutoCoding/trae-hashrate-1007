@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Camera,
@@ -60,7 +60,19 @@ function computeBrightnessSignature(dataUrl: string): Promise<{ w: number; h: nu
 export default function ImagingPage() {
   const nav = useNavigate();
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const { batch, holes, defects, detected, runDetection, computeAllDiagnosis, image, setImage, diagnosis } = useBatchStore();
+  const {
+    batch,
+    holes,
+    defects,
+    detected,
+    runDetection,
+    computeAllDiagnosis,
+    image,
+    setImage,
+    diagnosis,
+    imageBrightnessSignature,
+    clearDetection,
+  } = useBatchStore();
   const d = diagnosis;
 
   const [threshold, setThreshold] = useState(128);
@@ -69,10 +81,27 @@ export default function ImagingPage() {
   const [running, setRunning] = useState(false);
   const [highlight, setHighlight] = useState<HoleCategory | null>(null);
   const [sampleIdx, setSampleIdx] = useState(0);
-  const [previewSrc, setPreviewSrc] = useState<string | null>(image?.dataUrl ?? null);
-  const [previewMeta, setPreviewMeta] = useState<{ size: number; name: string; width?: number; height?: number; sig?: number } | null>(
-    image ? { size: image.fileSize, name: image.fileName, width: image.width, height: image.height } : null
-  );
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [previewMeta, setPreviewMeta] = useState<{ size: number; name: string; width?: number; height?: number; sig?: number } | null>(null);
+
+  useEffect(() => {
+    if (image) {
+      setPreviewSrc(image.dataUrl ?? null);
+      setPreviewMeta({
+        size: image.fileSize,
+        name: image.fileName,
+        width: image.width,
+        height: image.height,
+        sig: imageBrightnessSignature ? Math.round(imageBrightnessSignature / 2) : undefined,
+      });
+      if (image.source === "sample" && image.sampleIndex !== undefined) {
+        setSampleIdx(image.sampleIndex);
+      }
+    } else {
+      setPreviewSrc(null);
+      setPreviewMeta(null);
+    }
+  }, [image, imageBrightnessSignature]);
 
   const samples = ["标准切面示例", "边缘裂隙示例", "中心集孔示例", "超大孔示例"];
 
@@ -100,6 +129,7 @@ export default function ImagingPage() {
     const reader = new FileReader();
     reader.onload = async () => {
       const dataUrl = reader.result as string;
+      clearDetection();
       setPreviewSrc(dataUrl);
       const { w, h, sig, darkRatio } = await computeBrightnessSignature(dataUrl);
       const meta: CrossSectionImage = {
@@ -120,6 +150,7 @@ export default function ImagingPage() {
 
   const handleSampleClick = (idx: number) => {
     setSampleIdx(idx);
+    clearDetection();
     const brightnessBias = idx * 31 + 47;
     const w = 800, h = 800;
     const svgPreview = `data:image/svg+xml;utf8,` + encodeURIComponent(
@@ -471,8 +502,8 @@ export default function ImagingPage() {
                         const isCrack = h.category === "crack";
                         const show = !highlight || highlight === h.category;
                         if (!show) return null;
-                        const cx = h.centerX;
-                        const cy = h.centerY;
+                        const cx = h.centerX * 100;
+                        const cy = h.centerY * 100;
                         const sizeFactor = 0.32;
                         const rx = Math.max(
                           0.4,
@@ -547,8 +578,8 @@ export default function ImagingPage() {
                       })}
 
                       {defects.map((d) => {
-                        const cx = d.posX;
-                        const cy = d.posY;
+                        const cx = d.posX * 100;
+                        const cy = d.posY * 100;
                         const isBlister = d.type === "early_blister";
                         const r = isBlister ? 2.6 : 2.1;
                         return (
